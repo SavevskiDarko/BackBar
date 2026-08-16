@@ -44,7 +44,44 @@ const PLANS = {
 
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
-const money = (n, cur = "€") => `${cur}${(Number.isFinite(n) ? n : 0).toFixed(2)}`;
+
+/* Not every currency is a symbol in front of two decimals. The denar goes
+   after the number and is written in whole units — "250 ден", not "MKD250.00".
+   Anything not listed falls back to being treated as a leading symbol, so a
+   bar can still type something unusual and get a sensible result. */
+export const CURRENCIES = {
+  MKD: { label: "Denar", sign: "ден", after: true, decimals: 0 },
+  RSD: { label: "Dinar", sign: "дин", after: true, decimals: 0 },
+  BGN: { label: "Lev", sign: "лв", after: true, decimals: 2 },
+  ALL: { label: "Lek", sign: "L", after: true, decimals: 0 },
+  EUR: { label: "Euro", sign: "€", after: false, decimals: 2 },
+  USD: { label: "Dollar", sign: "$", after: false, decimals: 2 },
+  GBP: { label: "Pound", sign: "£", after: false, decimals: 2 },
+  CHF: { label: "Franc", sign: "CHF", after: true, decimals: 2 },
+  TRY: { label: "Lira", sign: "₺", after: false, decimals: 2 },
+};
+
+const curOf = (cur) =>
+  CURRENCIES[String(cur || "EUR").toUpperCase()] ||
+  { sign: cur || "€", after: false, decimals: 2 };
+
+/** Just the number, correctly rounded for the currency. Use where a column
+    header already carries the sign. */
+function amount(n, cur) {
+  const { decimals } = curOf(cur);
+  const v = Number.isFinite(n) ? n : 0;
+  return v.toLocaleString(undefined, {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
+/** The full thing: 250 ден · €12.50 */
+function money(n, cur = "EUR") {
+  const c = curOf(cur);
+  const v = amount(n, cur);
+  return c.after ? `${v} ${c.sign}` : `${c.sign}${v}`;
+}
 
 function since(ts, now) {
   const m = Math.max(0, Math.floor((now - ts) / 60000));
@@ -703,7 +740,7 @@ function Designer({ venue, zones, zoneId, setZoneId, orders, now, flash, actions
           <div>
             <Eyebrow>Room</Eyebrow>
             <div style={{ marginTop: 12 }}>
-              <Field label="Room name" value={zone.name} onChange={(v) => writeZone((z) => ({ ...z, name: v }))} />
+              <Field label="Room name" value={zone.name} onChange={(v) => actions.saveZone({ id: baseZone.id, name: v, sort: baseZone.sort })} />
             </div>
             <div style={{ marginTop: 14, fontFamily: SANS, fontSize: 13, color: C.sageDim, lineHeight: 1.6 }}>
               Pick a table on the plan to rename it, change its seats, or resize it.
@@ -806,8 +843,8 @@ function PriceList({ articles, currency, actions }) {
       <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, overflow: "hidden" }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 82px 82px 76px 40px", gap: 8, padding: "10px 14px", borderBottom: `1px solid ${C.line}`, background: C.raise }}>
           <Eyebrow>Article</Eyebrow>
-          <Eyebrow style={{ textAlign: "right" }}>Buy</Eyebrow>
-          <Eyebrow style={{ textAlign: "right" }}>Sell</Eyebrow>
+          <Eyebrow style={{ textAlign: "right" }}>Buy {curOf(currency).sign}</Eyebrow>
+          <Eyebrow style={{ textAlign: "right" }}>Sell {curOf(currency).sign}</Eyebrow>
           <Eyebrow style={{ textAlign: "right" }}>Margin</Eyebrow>
           <span />
         </div>
@@ -820,8 +857,8 @@ function PriceList({ articles, currency, actions }) {
                   <div style={{ fontFamily: SANS, fontSize: 13.5, color: C.cream, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</div>
                   <div style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim }}>{a.category}</div>
                 </div>
-                <div style={{ fontFamily: MONO, fontSize: 13, color: C.sage, textAlign: "right" }}>{a.cost.toFixed(2)}</div>
-                <div style={{ fontFamily: MONO, fontSize: 13, color: C.cream, textAlign: "right" }}>{a.price.toFixed(2)}</div>
+                <div style={{ fontFamily: MONO, fontSize: 13, color: C.sage, textAlign: "right" }}>{amount(a.cost, currency)}</div>
+                <div style={{ fontFamily: MONO, fontSize: 13, color: C.cream, textAlign: "right" }}>{amount(a.price, currency)}</div>
                 <div style={{ textAlign: "right", fontFamily: MONO, fontSize: 12, color: m > 0.65 ? C.mint : m > 0.4 ? C.brass : C.copper }}>{(m * 100).toFixed(0)}%</div>
                 <button onClick={() => setEditing({ ...a })} style={{ background: "transparent", border: "none", color: C.sageDim, cursor: "pointer", justifySelf: "end" }}><ChevronRight size={16} /></button>
               </div>
@@ -840,8 +877,8 @@ function PriceList({ articles, currency, actions }) {
             <Field label="Name" value={editing.name} onChange={(v) => setEditing({ ...editing, name: v })} placeholder="Draft lager 0.5" />
             <Field label="Category" value={editing.category} onChange={(v) => setEditing({ ...editing, category: v })} />
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <Field label="Purchase price" type="number" step="0.01" mono suffix={currency} value={editing.cost} onChange={(v) => setEditing({ ...editing, cost: v })} />
-              <Field label="Selling price" type="number" step="0.01" mono suffix={currency} value={editing.price} onChange={(v) => setEditing({ ...editing, price: v })} />
+              <Field label="Purchase price" type="number" step="0.01" mono suffix={curOf(currency).sign} value={editing.cost} onChange={(v) => setEditing({ ...editing, cost: v })} />
+              <Field label="Selling price" type="number" step="0.01" mono suffix={curOf(currency).sign} value={editing.price} onChange={(v) => setEditing({ ...editing, price: v })} />
             </div>
             <div style={{ background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9, padding: "10px 12px", display: "flex", justifyContent: "space-between" }}>
               <span style={{ fontFamily: SANS, fontSize: 12, color: C.sageDim }}>Profit per unit</span>
@@ -1143,18 +1180,30 @@ function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loadi
       </div>
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 12 }}>
-        <Eyebrow>Your bars</Eyebrow>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Eyebrow>Your bars</Eyebrow>
+          {loading && <Loader2 size={13} color={C.sageDim} className="animate-spin" />}
+        </div>
         <Btn variant="solid" icon={Plus} onClick={() => setAdding({
-          name: "", address: "", currency: "€", ownerName: "", ownerPin: "",
+          name: "", address: "", currency: "MKD", ownerName: "", ownerPin: "",
           plan: "starter", trialDays: 14,
         })}>Add a bar</Btn>
       </div>
 
-      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, overflow: "hidden" }}>
+      {!venues.length && !loading && (
+        <div style={{ background: C.panel, border: `1px dashed ${C.line2}`, borderRadius: 14, padding: 36, textAlign: "center" }}>
+          <Store size={22} color={C.sageDim} style={{ marginBottom: 12 }} />
+          <div style={{ fontFamily: SANS, fontSize: 14, color: C.cream }}>No bars yet</div>
+          <div style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim, marginTop: 6 }}>
+            Add your first client and they get a bar code to set up their tablets.
+          </div>
+        </div>
+      )}
+
+      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, overflow: "hidden", display: venues.length ? "block" : "none" }}>
         {venues.map((v, i) => {
           const st = states[i], meta = STATE_META[st];
-          const today = sales.filter((b) => b.venueId === v.id && b.paid && b.closedAt >= new Date().setHours(0, 0, 0, 0));
-          const openN = Object.values(orders).filter((o) => o.venueId === v.id).length;
+          const todayTotal = todayByBar[v.id] || 0;
           return (
             <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderBottom: `1px solid ${C.line}55`, flexWrap: "wrap" }}>
               <div style={{ minWidth: 160, flex: "1 1 160px" }}>
@@ -1212,7 +1261,7 @@ function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loadi
                   background: v.subscription.plan === p.id ? "rgba(230,180,80,0.1)" : "transparent",
                 }}>
                   <div style={{ fontFamily: SANS, fontSize: 12.5, fontWeight: 700, color: v.subscription.plan === p.id ? C.brass : C.cream }}>{p.name}</div>
-                  <div style={{ fontFamily: MONO, fontSize: 12, color: C.sage, marginTop: 3 }}>{money(p.price)}/mo</div>
+                  <div style={{ fontFamily: MONO, fontSize: 12, color: C.sage, marginTop: 3 }}>{money(p.price, "EUR")}/mo</div>
                   <div style={{ fontFamily: SANS, fontSize: 10.5, color: C.sageDim, marginTop: 4 }}>{p.maxTables} tables · {p.maxStaff} staff</div>
                 </button>
               ))}
@@ -1277,7 +1326,24 @@ function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loadi
               <Field label="Owner PIN" value={adding.ownerPin} onChange={(v) => setAdding({ ...adding, ownerPin: v.replace(/\D/g, "").slice(0, 4) })} mono maxLength={4} placeholder="1111" />
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <Field label="Currency" value={adding.currency} onChange={(v) => setAdding({ ...adding, currency: v })} mono />
+              <div>
+                <Eyebrow style={{ marginBottom: 6 }}>Currency</Eyebrow>
+                <select
+                  value={adding.currency}
+                  onChange={(e) => setAdding({ ...adding, currency: e.target.value })}
+                  style={{
+                    width: "100%", background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9,
+                    padding: "10px 12px", color: C.cream, fontFamily: SANS, fontSize: 14, outline: "none",
+                    appearance: "none",
+                  }}
+                >
+                  {Object.entries(CURRENCIES).map(([code, c]) => (
+                    <option key={code} value={code}>
+                      {code} — {money(1234.5, code)}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <Field label="Trial days" type="number" value={adding.trialDays} onChange={(v) => setAdding({ ...adding, trialDays: v })} mono />
             </div>
             <div>
@@ -1289,7 +1355,7 @@ function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loadi
                     border: `1px solid ${adding.plan === p.id ? C.brass : C.line}`,
                     background: adding.plan === p.id ? "rgba(230,180,80,0.1)" : "transparent",
                     color: adding.plan === p.id ? C.brass : C.sage, fontFamily: SANS, fontSize: 12, fontWeight: 700,
-                  }}>{p.name}<div style={{ fontFamily: MONO, fontSize: 11, opacity: 0.8, marginTop: 2 }}>{money(p.price)}</div></button>
+                  }}>{p.name}<div style={{ fontFamily: MONO, fontSize: 11, opacity: 0.8, marginTop: 2 }}>{money(p.price, "EUR")}</div></button>
                 ))}
               </div>
             </div>

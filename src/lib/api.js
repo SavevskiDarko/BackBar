@@ -231,7 +231,7 @@ export async function createBar({ name, address, currency, ownerName, ownerPin, 
   return mapBar(
     unwrap(
       await supabase.rpc("create_bar_with_owner", {
-        p_name: name, p_address: address, p_currency: currency,
+        p_name: name, p_address: address, p_currency: currency || 'MKD',
         p_owner_name: ownerName, p_owner_pin: ownerPin,
         p_plan: plan, p_trial_days: trialDays,
       })

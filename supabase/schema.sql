@@ -323,7 +323,7 @@ create policy admins_self_read on platform_admins
 
 create or replace function verify_staff_pin(p_bar_code text, p_pin text)
 returns table (staff_id uuid, bar_id uuid, staff_name text, staff_role text, bar_name text)
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, extensions as $$
 declare v_bar bars%rowtype;
 begin
   select * into v_bar from bars where bar_code = p_bar_code;
@@ -342,7 +342,7 @@ revoke execute on function verify_staff_pin(text, text) from anon, authenticated
 
 -- Hash a PIN on the way in, so plaintext is never stored.
 create or replace function set_staff_pin(p_staff uuid, p_pin text)
-returns void language plpgsql security definer set search_path = public as $$
+returns void language plpgsql security definer set search_path = public, extensions as $$
 begin
   if length(p_pin) <> 4 or p_pin !~ '^[0-9]{4}$' then
     raise exception 'PIN must be exactly 4 digits';

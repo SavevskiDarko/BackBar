@@ -179,7 +179,7 @@ create or replace function create_bar_with_owner(
   p_owner_name text, p_owner_pin text,
   p_plan text default 'starter', p_trial_days int default 14
 ) returns bars
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, extensions as $$
 declare v_bar bars%rowtype; v_price numeric; v_trial timestamptz;
 begin
   if not is_platform() then raise exception 'not_authorised'; end if;
@@ -234,7 +234,7 @@ end $$;
 create or replace function upsert_staff(
   p_staff uuid, p_bar uuid, p_name text, p_pin text
 ) returns staff
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, extensions as $$
 declare v staff%rowtype;
 begin
   if not (is_owner_of(p_bar) or is_platform()) then raise exception 'not_authorised'; end if;
