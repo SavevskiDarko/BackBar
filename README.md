@@ -100,7 +100,7 @@ Read the comments in `schema.sql`; the short version:
 - **`supabase/schema.sql`** — tables and RLS
 - **`supabase/rpc.sql`** — login throttling, server-side price stamping, atomic
   bill closing, platform billing calls
-- **`supabase/functions/staff-login/`** — verifies PINs, mints scoped JWTs
+- **`worker/`** — the `backbar-auth` Cloudflare Worker: verifies PINs, mints scoped JWTs
 - **`src/lib/`** — client, auth, data layer, realtime hook
 
 See **PORTING.md** for wiring `App.jsx` onto it.
@@ -138,7 +138,7 @@ src/lib/api.js                  every read and write
 src/lib/useBarData.js           realtime floor
 supabase/schema.sql             tables + RLS          (run first)
 supabase/rpc.sql                functions             (run second)
-supabase/functions/staff-login  PIN → JWT
+worker/                         backbar-auth Worker: PIN → JWT
 PORTING.md                      how to wire App.jsx to all of it
 .github/workflows/              GitHub Pages deploy (skip if using Vercel)
 ```

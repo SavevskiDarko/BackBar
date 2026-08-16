@@ -1,4 +1,4 @@
-import { supabase, staffClient, FUNCTIONS_URL } from "./supabase";
+import { supabase, staffClient, AUTH_URL } from "./supabase";
 
 /* ===========================================================================
    Sessions
@@ -51,12 +51,11 @@ export function clearStaffSession() {
    -------------------------------------------------------------------------- */
 
 async function callLogin(payload) {
-  const res = await fetch(`${FUNCTIONS_URL}/staff-login`, {
+  // AUTH_URL points at the backbar-auth Cloudflare Worker. No apikey header:
+  // the Worker holds the service_role key, the browser holds nothing.
+  const res = await fetch(AUTH_URL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   const body = await res.json().catch(() => ({}));

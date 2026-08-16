@@ -27,4 +27,8 @@ export function staffClient(token) {
   return c;
 }
 
-export const FUNCTIONS_URL = `${URL}/functions/v1`;
+/* The auth endpoint. In production the same Worker serves this app, so a
+   relative path is correct and there is no CORS. Set VITE_AUTH_URL only for
+   `npm run dev`, where Vite is on :5173 and the Worker is elsewhere.
+   It is the only endpoint that ever sees a PIN. */
+export const AUTH_URL = import.meta.env.VITE_AUTH_URL || "/api/auth";

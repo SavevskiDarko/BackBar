@@ -1,0 +1,32 @@
+# One Worker serves the whole product: the React app as static assets, and the
+# auth API at /api/auth. Same origin, so there is no CORS to configure and no
+# second hosting provider to pay for.
+#
+# Matches the Cloudflare build settings:
+#   Root directory  /
+#   Build command   npm run build      → produces ./dist
+#   Deploy command  npx wrangler deploy
+name = "backbar"
+main = "./worker/src/index.js"
+compatibility_date = "2026-08-16"
+
+[observability]
+enabled = true
+
+[assets]
+directory = "./dist/"
+binding = "ASSETS"
+# Unknown paths return index.html rather than a 404.
+not_found_handling = "single-page-application"
+# Only /api/* reaches the Worker script. Everything else is served straight
+# from the edge as a static file, which is faster and cheaper.
+run_worker_first = ["/api/*"]
+
+# Secrets are NOT set here. Add them in the dashboard under
+# Settings → Variables and Secrets, or with `npx wrangler secret put NAME`:
+#   SUPABASE_URL
+#   SUPABASE_SERVICE_ROLE_KEY
+#   JWT_SECRET
+#
+# SUPABASE_SERVICE_ROLE_KEY bypasses every security rule in the database.
+# It belongs here and nowhere else. Never in .env, never in the front end.

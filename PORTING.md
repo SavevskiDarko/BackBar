@@ -15,15 +15,17 @@ In the SQL editor, run in order:
 1. `supabase/schema.sql`
 2. `supabase/rpc.sql`
 
-Then deploy the login function and give it the signing secret:
+Then deploy the auth Worker:
 
 ```bash
-supabase functions deploy staff-login --no-verify-jwt
-supabase secrets set JWT_SECRET="<Settings → API → JWT Secret>"
-supabase secrets set ALLOWED_ORIGIN="https://your-domain.com"
+cd worker && npm install
+npx wrangler secret put SUPABASE_URL
+npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+npx wrangler secret put JWT_SECRET
+npx wrangler deploy
 ```
 
-`--no-verify-jwt` is right: nobody has a token yet when they're logging in.
+Copy the resulting URL into `.env.local` as `VITE_AUTH_URL`.
 
 Make yourself the platform admin — sign up once through Supabase Auth, then:
 
