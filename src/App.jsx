@@ -3,13 +3,23 @@ import {
   LayoutGrid, Store, BarChart3, Plus, Minus, Trash2, X, Check, Circle, Square,
   RectangleHorizontal, Users, Clock, CreditCard, Banknote, Search, ChevronRight,
   Copy, Save, Receipt, RotateCw, Loader2, Wine, ListOrdered, LogOut, Delete,
-  ShieldCheck, UserPlus, CalendarClock, TrendingUp, AlertTriangle, Lock, ArrowLeft,
-  KeyRound, Pause, Play, Wallet,
+  ShieldCheck, UserPlus, AlertTriangle, ArrowLeft, KeyRound, Pause, Play, Wallet,
 } from "lucide-react";
+
+import {
+  loadPairing, clearPairing, loadStaffSession, clearStaffSession,
+  pairDevice, signInStaff, signInPlatform, restorePlatformSession, signOut,
+  clientFor, onExpired,
+} from "./lib/auth";
+import { useBarData } from "./lib/useBarData";
+import * as api from "./lib/api";
 
 /* ============================================================================
    BACKBAR — bar floor & order tracking, sold as a subscription
    Three seats: platform (you) · bar owner (your client) · waiter (their staff)
+
+   All data lives in Postgres. Nothing here decides who may see what — the
+   database does, and this file only decides what to render.
    ========================================================================== */
 
 const C = {
@@ -21,10 +31,6 @@ const MONO = "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospac
 const SANS = "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 
 const PLAN_W = 1000, PLAN_H = 700;
-const K_CFG = "backbar:v2:config";
-const K_ORD = "backbar:v2:orders";
-const K_SAL = "backbar:v2:sales";
-const K_DEV = "backbar:v2:device";
 const DAY = 86400000;
 
 const PLANS = {
@@ -35,7 +41,6 @@ const PLANS = {
 
 /* ---------------------------------------------------------------- utilities */
 
-const uid = (p = "id") => `${p}_${Math.random().toString(36).slice(2, 9)}`;
 const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
 const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
 const money = (n, cur = "€") => `${cur}${(Number.isFinite(n) ? n : 0).toFixed(2)}`;
@@ -47,27 +52,14 @@ function since(ts, now) {
 function shortDate(ts) {
   return new Date(ts).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
-function addMonth(ts) {
-  const d = new Date(ts);
-  d.setMonth(d.getMonth() + 1);
-  return d.getTime();
-}
 function daysBetween(a, b) {
   return Math.round((a - b) / DAY);
 }
-function makeRng(seed) {
-  let s = seed;
-  return () => ((s = (s * 1664525 + 1013904223) % 4294967296) / 4294967296);
-}
-// Bar codes are issued by the platform, so they must be unique everywhere.
-// PINs are only ever checked inside one bar, so they may repeat across bars.
-function newBarCode(taken) {
-  let c;
-  do { c = String(1000 + Math.floor(Math.random() * 8999)); } while (taken.includes(c));
-  return c;
-}
 
-/* ---------------------------------------------------- subscription lifecycle */
+/* ---------------------------------------------------- subscription lifecycle
+   This mirrors bar_is_live() in the database. It exists only to render banners
+   and pills — the database is what actually enforces access, so a tampered
+   copy of this function gains nobody anything. */
 
 function subState(venue, now) {
   const s = venue.subscription;
@@ -84,212 +76,6 @@ const STATE_META = {
   suspended: { label: "Suspended", color: C.copper },
 };
 const canOperate = (st) => st === "active" || st === "trial" || st === "past_due";
-
-/* ------------------------------------------------------------------ storage */
-
-/* Local-only persistence. This is a stand-in: it keeps data on ONE device.
-   See supabase/schema.sql for the real multi-device backend. */
-const hasStore = typeof window !== "undefined" && !!window.localStorage;
-async function sget(key) {
-  if (!hasStore) return null;
-  try {
-    const v = window.localStorage.getItem(key);
-    return v ? JSON.parse(v) : null;
-  } catch { return null; }
-}
-async function sset(key, val) {
-  if (!hasStore) return false;
-  try { window.localStorage.setItem(key, JSON.stringify(val)); return true; } catch { return false; }
-}
-
-/* --------------------------------------------------------------- seed data */
-
-function seedArticles() {
-  const rows = [
-    ["Draft lager 0.3", "Beer", 0.75, 3.0], ["Draft lager 0.5", "Beer", 1.2, 4.2],
-    ["IPA bottle", "Beer", 1.6, 5.0], ["Wheat beer", "Beer", 1.4, 4.5],
-    ["Alcohol-free beer", "Beer", 0.9, 3.2], ["Negroni", "Cocktails", 2.4, 9.5],
-    ["Aperol spritz", "Cocktails", 1.9, 8.0], ["Mojito", "Cocktails", 2.1, 8.5],
-    ["Espresso martini", "Cocktails", 2.6, 10.0], ["Gin & tonic", "Cocktails", 2.0, 8.0],
-    ["Old fashioned", "Cocktails", 2.8, 11.0], ["Vodka shot", "Spirits", 0.9, 3.5],
-    ["Whisky 12y", "Spirits", 2.2, 7.5], ["Dark rum", "Spirits", 1.3, 5.0],
-    ["Tequila shot", "Spirits", 1.1, 4.0], ["Herbal shot", "Spirits", 1.0, 3.5],
-    ["House red, glass", "Wine", 1.2, 4.5], ["House white, glass", "Wine", 1.2, 4.5],
-    ["Prosecco, glass", "Wine", 1.6, 6.0], ["Red bottle 0.75", "Wine", 7.0, 26.0],
-    ["Cola 0.25", "Soft", 0.55, 2.5], ["Sparkling water", "Soft", 0.35, 2.2],
-    ["Orange juice", "Soft", 0.8, 3.5], ["Tonic water", "Soft", 0.6, 2.8],
-    ["Energy drink", "Soft", 1.1, 4.0], ["Espresso", "Coffee", 0.28, 1.8],
-    ["Cappuccino", "Coffee", 0.42, 2.6], ["Tea", "Coffee", 0.2, 2.2],
-    ["Salted peanuts", "Food", 0.6, 2.5], ["Olives", "Food", 0.9, 3.8],
-    ["Nachos", "Food", 1.8, 6.5], ["Club sandwich", "Food", 2.9, 9.0],
-  ];
-  return rows.map(([name, category, cost, price], i) => ({
-    id: `a${i + 1}`, name, category, cost, price, active: true,
-  }));
-}
-
-const T = (label, shape, x, y, w, h, seats, rot = 0) => ({ id: uid("t"), label, shape, x, y, w, h, seats, rot });
-
-function sub(planId, opts = {}) {
-  const now = Date.now();
-  return {
-    plan: planId,
-    price: PLANS[planId].price,
-    startedAt: opts.startedAt ?? now - 120 * DAY,
-    nextDueAt: opts.nextDueAt ?? now + 18 * DAY,
-    trialEndsAt: opts.trialEndsAt ?? null,
-    graceDays: 7,
-    suspended: opts.suspended ?? false,
-    payments: opts.payments ?? [],
-  };
-}
-function pastPayments(n, price, endTs) {
-  const out = [];
-  for (let i = n; i >= 1; i--) {
-    out.push({ id: uid("p"), amount: price, paidAt: endTs - i * 30 * DAY, note: "Card" });
-  }
-  return out;
-}
-
-function seedVenues() {
-  const now = Date.now();
-  return [
-    {
-      id: "v1", name: "Neon Lounge", address: "Kralja Petra 14", currency: "€", code: "4821",
-      ownerName: "Marko", ownerPin: "1111", allowStaffDiscount: false,
-      staff: [
-        { id: "s1", name: "Ana", pin: "1234" },
-        { id: "s2", name: "Luka", pin: "1235" },
-      ],
-      subscription: sub("pro", { nextDueAt: now + 18 * DAY, payments: pastPayments(4, 59, now) }),
-      zones: [
-        {
-          id: "z1", name: "Main room",
-          tables: [
-            T("BAR", "bar", 500, 88, 460, 74, 8),
-            T("1", "round", 130, 258, 96, 96, 4), T("2", "round", 290, 258, 96, 96, 4),
-            T("3", "round", 450, 258, 96, 96, 4), T("4", "square", 646, 268, 104, 104, 4),
-            T("5", "square", 828, 268, 104, 104, 4), T("6", "rect", 176, 438, 168, 96, 6),
-            T("7", "rect", 420, 438, 168, 96, 6), T("8", "round", 660, 452, 96, 96, 4),
-            T("9", "round", 838, 452, 96, 96, 4), T("10", "round", 190, 606, 88, 88, 3),
-            T("11", "round", 372, 606, 88, 88, 3), T("12", "rect", 690, 612, 220, 96, 8),
-          ],
-        },
-        {
-          id: "z2", name: "Terrace",
-          tables: [
-            T("T1", "round", 160, 160, 92, 92, 4), T("T2", "round", 340, 160, 92, 92, 4),
-            T("T3", "round", 520, 160, 92, 92, 4), T("T4", "round", 700, 160, 92, 92, 4),
-            T("T5", "round", 160, 360, 92, 92, 4), T("T6", "round", 340, 360, 92, 92, 4),
-            T("T7", "round", 520, 360, 92, 92, 4), T("T8", "round", 700, 360, 92, 92, 4),
-            T("Lounge", "rect", 430, 560, 320, 110, 10),
-          ],
-        },
-      ],
-    },
-    {
-      id: "v2", name: "Harbour Tap", address: "Dock 3", currency: "€", code: "7390",
-      ownerName: "Sara", ownerPin: "1111", allowStaffDiscount: true,
-      staff: [{ id: "s3", name: "Ivan", pin: "1234" }],
-      subscription: sub("starter", { startedAt: now - 6 * DAY, nextDueAt: now + 8 * DAY, trialEndsAt: now + 8 * DAY }),
-      zones: [
-        {
-          id: "z3", name: "Taproom",
-          tables: [
-            T("BAR", "bar", 220, 100, 340, 70, 6), T("1", "rect", 720, 180, 200, 96, 6),
-            T("2", "round", 200, 300, 96, 96, 4), T("3", "round", 380, 300, 96, 96, 4),
-            T("4", "round", 200, 480, 96, 96, 4), T("5", "round", 380, 480, 96, 96, 4),
-            T("6", "rect", 720, 440, 200, 96, 6),
-          ],
-        },
-      ],
-    },
-    {
-      id: "v3", name: "Kino Bar", address: "Cinema square 2", currency: "€", code: "5514",
-      ownerName: "Petra", ownerPin: "1111", allowStaffDiscount: false,
-      staff: [{ id: "s4", name: "Nina", pin: "1234" }],
-      subscription: sub("starter", { nextDueAt: now - 3 * DAY, payments: pastPayments(2, 29, now - 30 * DAY) }),
-      zones: [
-        {
-          id: "z4", name: "Foyer",
-          tables: [
-            T("BAR", "bar", 500, 110, 320, 70, 5), T("1", "round", 240, 320, 96, 96, 4),
-            T("2", "round", 440, 320, 96, 96, 4), T("3", "round", 640, 320, 96, 96, 4),
-            T("4", "rect", 380, 520, 200, 96, 6),
-          ],
-        },
-      ],
-    },
-    {
-      id: "v4", name: "Old Port", address: "Quay 9", currency: "€", code: "6602",
-      ownerName: "Dino", ownerPin: "1111", allowStaffDiscount: false,
-      staff: [],
-      subscription: sub("starter", { nextDueAt: now - 44 * DAY, suspended: true, payments: pastPayments(1, 29, now - 60 * DAY) }),
-      zones: [{ id: "z5", name: "Main room", tables: [T("1", "round", 300, 300, 96, 96, 4), T("2", "round", 500, 300, 96, 96, 4)] }],
-    },
-  ];
-}
-
-function seedSales(venues, articles) {
-  const rng = makeRng(20260816);
-  const now = Date.now();
-  const out = [];
-  [venues[0], venues[1], venues[2]].forEach((v, vi) => {
-    const tables = v.zones.flatMap((z) => z.tables).filter((t) => t.shape !== "bar");
-    const staff = v.staff.length ? v.staff : [{ id: "own", name: v.ownerName }];
-    const count = vi === 0 ? 26 : 10;
-    for (let i = 0; i < count; i++) {
-      const minsAgo = 20 + Math.floor(rng() * 400);
-      const n = 1 + Math.floor(rng() * 5);
-      const lines = [];
-      for (let j = 0; j < n; j++) {
-        const a = articles[Math.floor(rng() * articles.length)];
-        const qty = 1 + Math.floor(rng() * 3);
-        const ex = lines.find((l) => l.articleId === a.id);
-        if (ex) ex.qty += qty;
-        else lines.push({ articleId: a.id, name: a.name, category: a.category, price: a.price, cost: a.cost, qty });
-      }
-      const total = round2(lines.reduce((s, l) => s + l.price * l.qty, 0));
-      const cost = round2(lines.reduce((s, l) => s + l.cost * l.qty, 0));
-      const tb = tables[Math.floor(rng() * tables.length)];
-      const who = staff[Math.floor(rng() * staff.length)];
-      const unpaid = rng() > 0.93;
-      out.push({
-        id: uid("b"), venueId: v.id, tableLabel: tb.label, closedAt: now - minsAgo * 60000,
-        method: unpaid ? null : rng() > 0.45 ? "card" : "cash",
-        paid: !unpaid, discount: 0, lines, total, cost, profit: round2(total - cost),
-        staffId: who.id, staffName: who.name,
-      });
-    }
-  });
-  return out.sort((a, b) => a.closedAt - b.closedAt);
-}
-
-function seedOrders(venues, articles) {
-  const v = venues[0];
-  const main = v.zones[0].tables;
-  const pick = (n) => articles.find((a) => a.name === n);
-  const mk = (table, items, minsAgo, guests, who) => ({
-    key: `${v.id}/${table.id}`, venueId: v.id, tableId: table.id, tableLabel: table.label,
-    zoneId: v.zones[0].id, guests, openedAt: Date.now() - minsAgo * 60000,
-    staffId: who.id, staffName: who.name,
-    lines: items.map(([n, q]) => {
-      const a = pick(n);
-      return { articleId: a.id, name: a.name, category: a.category, price: a.price, cost: a.cost, qty: q };
-    }),
-  });
-  const [ana, luka] = v.staff;
-  const list = [
-    mk(main[1], [["Draft lager 0.5", 4], ["Salted peanuts", 2]], 38, 4, ana),
-    mk(main[6], [["Aperol spritz", 3], ["Negroni", 2], ["Olives", 1]], 92, 6, luka),
-    mk(main[9], [["Espresso", 2], ["Cappuccino", 1]], 12, 2, ana),
-    mk(main[12], [["Red bottle 0.75", 2], ["Nachos", 2], ["Sparkling water", 3]], 64, 8, luka),
-  ];
-  const map = {};
-  list.forEach((o) => (map[o.key] = o));
-  return map;
-}
-
 /* ------------------------------------------------------------- UI primitives */
 
 function Eyebrow({ children, style }) {
@@ -425,26 +211,27 @@ function Keypad({ onDigit, onBack, onClear }) {
   );
 }
 
-function CodeEntry({ length, onSubmit, error, dotLabel }) {
+function CodeEntry({ length, onSubmit, error, dotLabel, busy }) {
   const [code, setCode] = useState("");
 
   useEffect(() => { setCode(""); }, [dotLabel]);
 
   useEffect(() => {
-    if (code.length === length) {
+    if (code.length === length && !busy) {
       const t = setTimeout(() => { onSubmit(code); setCode(""); }, 120);
       return () => clearTimeout(t);
     }
-  }, [code, length, onSubmit]);
+  }, [code, length, onSubmit, busy]);
 
   useEffect(() => {
     const h = (e) => {
+      if (busy) return;
       if (/^[0-9]$/.test(e.key)) setCode((p) => (p.length < length ? p + e.key : p));
       if (e.key === "Backspace") setCode((p) => p.slice(0, -1));
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [length]);
+  }, [length, busy]);
 
   return (
     <>
@@ -461,18 +248,20 @@ function CodeEntry({ length, onSubmit, error, dotLabel }) {
       <div style={{ minHeight: 34, textAlign: "center", fontSize: 12.5, color: C.copper, marginBottom: 10, lineHeight: 1.4, padding: "0 8px" }}>
         {error || ""}
       </div>
-      <Keypad
-        onDigit={(d) => setCode((p) => (p.length < length ? p + d : p))}
-        onBack={() => setCode((p) => p.slice(0, -1))}
-        onClear={() => setCode("")}
-      />
+      <div style={{ opacity: busy ? 0.45 : 1, pointerEvents: busy ? "none" : "auto" }}>
+        <Keypad
+          onDigit={(d) => setCode((p) => (p.length < length ? p + d : p))}
+          onBack={() => setCode((p) => p.slice(0, -1))}
+          onClear={() => setCode("")}
+        />
+      </div>
     </>
   );
 }
 
 /* The device is tied to one bar. After that, a PIN only has to be unique
    inside that bar — two bars can both have a waiter on 1234. */
-function AuthScreen({ platformName, pairedVenue, onPair, onUnpair, onPin, onPlatform, error, clearError }) {
+function AuthScreen({ platformName, pairedVenue, onPair, onUnpair, onPin, onPlatform, error, clearError, busy }) {
   const [mode, setMode] = useState(pairedVenue ? "pin" : "pair");
   const [hint, setHint] = useState(false);
 
@@ -480,7 +269,7 @@ function AuthScreen({ platformName, pairedVenue, onPair, onUnpair, onPin, onPlat
   const go = (m) => { clearError(); setMode(m); };
 
   const heading =
-    mode === "platform" ? { title: "Platform sign-in", sub: "Your code runs the whole network" }
+    mode === "platform" ? { title: "Platform sign-in", sub: "The account that runs the whole network" }
     : mode === "pair" ? { title: "Set up this device", sub: "Enter the bar's code — you only do this once" }
     : { title: pairedVenue.name, sub: "Enter your PIN to open the floor" };
 
@@ -498,9 +287,9 @@ function AuthScreen({ platformName, pairedVenue, onPair, onUnpair, onPin, onPlat
           <div style={{ fontSize: 12.5, color: C.sageDim, marginTop: 5 }}>{heading.sub}</div>
         </div>
 
-        {mode === "pair" && <CodeEntry length={4} onSubmit={onPair} error={error} dotLabel="pair" />}
-        {mode === "pin" && <CodeEntry length={4} onSubmit={onPin} error={error} dotLabel="pin" />}
-        {mode === "platform" && <CodeEntry length={6} onSubmit={onPlatform} error={error} dotLabel="platform" />}
+        {mode === "pair" && <CodeEntry length={4} onSubmit={onPair} error={error} busy={busy} dotLabel="pair" />}
+        {mode === "pin" && <CodeEntry length={4} onSubmit={onPin} error={error} busy={busy} dotLabel="pin" />}
+        {mode === "platform" && <PlatformForm onSubmit={onPlatform} error={error} busy={busy} />}
 
         <div style={{ display: "flex", justifyContent: "center", gap: 14, marginTop: 18, flexWrap: "wrap" }}>
           {mode === "pin" && (
@@ -511,18 +300,12 @@ function AuthScreen({ platformName, pairedVenue, onPair, onUnpair, onPin, onPlat
         </div>
 
         <button onClick={() => setHint(!hint)} style={{ ...linkBtn, width: "100%", marginTop: 14 }}>
-          {hint ? "Hide demo codes" : "Demo codes"}
+          {hint ? "Hide" : "Where do I get a code?"}
         </button>
         {hint && (
-          <div style={{ marginTop: 8, background: C.panel, border: `1px dashed ${C.line2}`, borderRadius: 11, padding: 13, fontFamily: MONO, fontSize: 11.5, color: C.sage, lineHeight: 1.85 }}>
-            <div style={{ fontFamily: SANS, fontSize: 10, letterSpacing: "0.16em", color: C.sageDim, marginBottom: 5 }}>BAR CODES</div>
-            <div><span style={{ color: C.brass }}>4821</span> Neon Lounge · <span style={{ color: C.brass }}>7390</span> Harbour Tap</div>
-            <div><span style={{ color: C.brass }}>5514</span> Kino Bar (overdue) · <span style={{ color: C.brass }}>6602</span> Old Port (suspended)</div>
-            <div style={{ fontFamily: SANS, fontSize: 10, letterSpacing: "0.16em", color: C.sageDim, margin: "9px 0 5px" }}>PINS — SAME AT EVERY BAR</div>
-            <div><span style={{ color: C.brass }}>1111</span> the owner · <span style={{ color: C.brass }}>1234</span> a waiter</div>
-            <div style={{ fontFamily: SANS, fontSize: 10, letterSpacing: "0.16em", color: C.sageDim, margin: "9px 0 5px" }}>PLATFORM</div>
-            <div><span style={{ color: C.brass }}>900900</span> you</div>
-            <div style={{ color: C.sageDim, marginTop: 7, fontFamily: SANS, fontSize: 11 }}>Remove this list before you ship.</div>
+          <div style={{ marginTop: 8, background: C.panel, border: `1px dashed ${C.line2}`, borderRadius: 11, padding: 13, fontFamily: SANS, fontSize: 11.5, color: C.sage, lineHeight: 1.6 }}>
+            The bar code is issued by {platformName} and set up once per device.
+            Your PIN is set by your bar's owner and only works here.
           </div>
         )}
       </div>
@@ -611,7 +394,7 @@ function TableNode({ table, scale, order, selected, onPointerDown, onClick, mode
   );
 }
 
-function FloorPlan({ zone, orders, venueId, mode, selectedId, onSelect, onMove, currency, now }) {
+function FloorPlan({ zone, orders, venueId, mode, selectedId, onSelect, onMove, onMoveEnd, currency, now }) {
   const ref = useRef(null);
   const w = useWidth(ref);
   const scale = w ? w / PLAN_W : 0;
@@ -641,7 +424,9 @@ function FloorPlan({ zone, orders, venueId, mode, selectedId, onSelect, onMove, 
 
   return (
     <div
-      ref={ref} onPointerMove={move} onPointerUp={() => (drag.current = null)} onPointerCancel={() => (drag.current = null)}
+      ref={ref} onPointerMove={move}
+      onPointerUp={() => { if (drag.current && onMoveEnd) onMoveEnd(drag.current.id); drag.current = null; }}
+      onPointerCancel={() => { if (drag.current && onMoveEnd) onMoveEnd(drag.current.id); drag.current = null; }}
       onClick={(e) => e.target === e.currentTarget && mode === "design" && onSelect(null)}
       style={{
         position: "relative", width: "100%", aspectRatio: `${PLAN_W} / ${PLAN_H}`,
@@ -672,7 +457,7 @@ function FloorPlan({ zone, orders, venueId, mode, selectedId, onSelect, onMove, 
 
 /* -------------------------------------------------------------- order sheet */
 
-function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, onSettle, now, canSeeCost, canDiscount, actorName }) {
+function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, onSettle, now, canSeeCost, canDiscount, actorName, busy }) {
   const [lines, setLines] = useState(order ? order.lines.map((l) => ({ ...l })) : []);
   const [guests, setGuests] = useState(order ? order.guests : table.seats || 2);
   const [cat, setCat] = useState("All");
@@ -790,11 +575,16 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
                   cost {money(cost, venue.currency)} · profit {money(total - cost, venue.currency)}
                 </div>
               )}
+              {!order && lines.length > 0 && (
+                <div style={{ fontFamily: SANS, fontSize: 11, color: "#8A5A2E", marginTop: 6 }}>
+                  Save the order first, then you can close the bill.
+                </div>
+              )}
 
               {!paying ? (
                 <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                  <Btn variant="quiet" onClick={() => onCommit(lines, guests)} icon={Save} style={{ flex: 1, background: "#221E15", color: C.cream, borderColor: "#221E15" }}>Save order</Btn>
-                  <Btn variant="solid" disabled={!lines.length} onClick={() => setPaying(true)} icon={Receipt} style={{ flex: 1 }}>Close bill</Btn>
+                  <Btn variant="quiet" disabled={busy} onClick={() => onCommit(lines, guests)} icon={busy ? Loader2 : Save} style={{ flex: 1, background: "#221E15", color: C.cream, borderColor: "#221E15" }}>Save order</Btn>
+                  <Btn variant="solid" disabled={!lines.length || busy || !order} onClick={() => setPaying(true)} icon={Receipt} style={{ flex: 1 }}>Close bill</Btn>
                 </div>
               ) : (
                 <div style={{ marginTop: 14 }}>
@@ -812,10 +602,10 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
                   )}
                   <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.16em", color: "#8A7F66", marginBottom: 7 }}>DID THEY PAY?</div>
                   <div style={{ display: "flex", gap: 8 }}>
-                    <Btn variant="quiet" icon={Banknote} onClick={() => onSettle(lines, "cash", true, discount, total, cost)} style={{ flex: 1, background: "#221E15", color: C.cream, borderColor: "#221E15" }}>Cash</Btn>
-                    <Btn variant="solid" icon={CreditCard} onClick={() => onSettle(lines, "card", true, discount, total, cost)} style={{ flex: 1 }}>Card</Btn>
+                    <Btn variant="quiet" disabled={busy} icon={Banknote} onClick={() => onSettle("cash", true, discount)} style={{ flex: 1, background: "#221E15", color: C.cream, borderColor: "#221E15" }}>Cash</Btn>
+                    <Btn variant="solid" disabled={busy} icon={CreditCard} onClick={() => onSettle("card", true, discount)} style={{ flex: 1 }}>Card</Btn>
                   </div>
-                  <Btn variant="ghost" icon={AlertTriangle} onClick={() => onSettle(lines, null, false, discount, total, cost)}
+                  <Btn variant="ghost" disabled={busy} icon={AlertTriangle} onClick={() => onSettle(null, false, discount)}
                     style={{ width: "100%", marginTop: 8, color: "#8A5A2E", borderColor: "rgba(0,0,0,0.2)" }}>
                     Not paid — leave on the tab
                   </Btn>
@@ -832,16 +622,30 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
 
 /* ----------------------------------------------------------------- designer */
 
-function Designer({ venue, zoneId, setZoneId, updateVenue, orders, now, flash }) {
+function Designer({ venue, zones, zoneId, setZoneId, orders, now, flash, actions }) {
   const [sel, setSel] = useState(null);
+  const [drafts, setDrafts] = useState({}); // positions mid-drag, not yet saved
   const plan = PLANS[venue.subscription.plan];
-  const zone = venue.zones.find((z) => z.id === zoneId) || venue.zones[0];
+  const baseZone = zones.find((z) => z.id === zoneId) || zones[0];
+  const zone = {
+    ...baseZone,
+    tables: baseZone.tables.map((t) => (drafts[t.id] ? { ...t, ...drafts[t.id] } : t)),
+  };
   const table = zone.tables.find((t) => t.id === sel);
-  const tableCount = venue.zones.reduce((s, z) => s + z.tables.length, 0);
+  const tableCount = zones.reduce((s, z) => s + z.tables.length, 0);
 
-  const writeZone = (fn) => updateVenue({ ...venue, zones: venue.zones.map((z) => (z.id === zone.id ? fn(z) : z)) });
-  const move = (id, x, y) => writeZone((z) => ({ ...z, tables: z.tables.map((t) => (t.id === id ? { ...t, x, y } : t)) }));
-  const patch = (id, p) => writeZone((z) => ({ ...z, tables: z.tables.map((t) => (t.id === id ? { ...t, ...p } : t)) }));
+  // Dragging fires on every pointer move. Keep it local; write once on release.
+  const move = (id, x, y) => setDrafts((d) => ({ ...d, [id]: { x, y } }));
+  const commitMove = (id) => {
+    const d = drafts[id];
+    if (!d) return;
+    actions.moveTable(id, d.x, d.y);
+    setDrafts(({ [id]: _drop, ...rest }) => rest);
+  };
+  const patch = (id, p) => {
+    const t = baseZone.tables.find((x) => x.id === id);
+    actions.saveTable(baseZone.id, { ...t, ...p });
+  };
 
   const addTable = (shape) => {
     if (tableCount >= plan.maxTables) return flash(`${plan.name} covers ${plan.maxTables} tables. Ask your provider to upgrade.`);
@@ -852,16 +656,13 @@ function Designer({ venue, zoneId, setZoneId, updateVenue, orders, now, flash })
       rect: { w: 180, h: 96, seats: 6, label: String(n) },
       bar: { w: 360, h: 72, seats: 6, label: "BAR" },
     }[shape];
-    const t = { id: uid("t"), shape, x: 500, y: 350, rot: 0, ...preset };
-    writeZone((z) => ({ ...z, tables: [...z.tables, t] }));
-    setSel(t.id);
+    actions.saveTable(baseZone.id, { shape, x: 500, y: 350, rot: 0, ...preset });
   };
 
-  const addZone = () => {
-    if (venue.zones.length >= plan.maxRooms) return flash(`${plan.name} covers ${plan.maxRooms} room${plan.maxRooms > 1 ? "s" : ""}. Upgrade to add more.`);
-    const z = { id: uid("z"), name: `Room ${venue.zones.length + 1}`, tables: [] };
-    updateVenue({ ...venue, zones: [...venue.zones, z] });
-    setZoneId(z.id);
+  const addZone = async () => {
+    if (zones.length >= plan.maxRooms) return flash(`${plan.name} covers ${plan.maxRooms} room${plan.maxRooms > 1 ? "s" : ""}. Upgrade to add more.`);
+    const z = await actions.saveZone({ name: `Room ${zones.length + 1}`, sort: zones.length });
+    if (z) setZoneId(z.id);
     setSel(null);
   };
 
@@ -869,7 +670,7 @@ function Designer({ venue, zoneId, setZoneId, updateVenue, orders, now, flash })
     <div style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
       <div style={{ flex: "1 1 460px", minWidth: 300 }}>
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
-          {venue.zones.map((z) => (
+          {zones.map((z) => (
             <button key={z.id} onClick={() => { setZoneId(z.id); setSel(null); }} style={{
               padding: "7px 13px", borderRadius: 9, border: `1px solid ${z.id === zone.id ? C.brass : C.line}`,
               background: z.id === zone.id ? "rgba(230,180,80,0.1)" : "transparent",
@@ -884,7 +685,8 @@ function Designer({ venue, zoneId, setZoneId, updateVenue, orders, now, flash })
           </span>
         </div>
 
-        <FloorPlan zone={zone} orders={orders} venueId={venue.id} mode="design" selectedId={sel} onSelect={setSel} onMove={move} currency={venue.currency} now={now} />
+        <FloorPlan zone={zone} orders={orders} venueId={venue.id} mode="design" selectedId={sel}
+          onSelect={setSel} onMove={move} onMoveEnd={commitMove} currency={venue.currency} now={now} />
 
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
           <Btn icon={Circle} onClick={() => addTable("round")}>Round table</Btn>
@@ -905,10 +707,10 @@ function Designer({ venue, zoneId, setZoneId, updateVenue, orders, now, flash })
             <div style={{ marginTop: 14, fontFamily: SANS, fontSize: 13, color: C.sageDim, lineHeight: 1.6 }}>
               Pick a table on the plan to rename it, change its seats, or resize it.
             </div>
-            {venue.zones.length > 1 && (
-              <Btn variant="danger" icon={Trash2} style={{ marginTop: 16, width: "100%" }} onClick={() => {
-                const rest = venue.zones.filter((z) => z.id !== zone.id);
-                updateVenue({ ...venue, zones: rest });
+            {zones.length > 1 && (
+              <Btn variant="danger" icon={Trash2} style={{ marginTop: 16, width: "100%" }} onClick={async () => {
+                const rest = zones.filter((z) => z.id !== baseZone.id);
+                await actions.deleteZone(baseZone.id);
                 setZoneId(rest[0].id);
               }}>Delete room</Btn>
             )}
@@ -947,13 +749,12 @@ function Designer({ venue, zoneId, setZoneId, updateVenue, orders, now, flash })
                 <Btn icon={RotateCw} style={{ flex: 1 }} onClick={() => patch(table.id, { rot: ((table.rot || 0) + 45) % 360 })}>Rotate</Btn>
                 <Btn icon={Copy} style={{ flex: 1 }} onClick={() => {
                   if (tableCount >= plan.maxTables) return flash(`${plan.name} covers ${plan.maxTables} tables.`);
-                  const c = { ...table, id: uid("t"), x: clamp(table.x + 60, 0, PLAN_W), y: clamp(table.y + 40, 0, PLAN_H) };
-                  writeZone((z) => ({ ...z, tables: [...z.tables, c] }));
-                  setSel(c.id);
+                  const { id: _drop, ...rest } = table;
+                  actions.saveTable(baseZone.id, { ...rest, x: clamp(table.x + 60, 0, PLAN_W), y: clamp(table.y + 40, 0, PLAN_H) });
                 }}>Duplicate</Btn>
               </div>
               <Btn variant="danger" icon={Trash2} style={{ width: "100%" }} onClick={() => {
-                writeZone((z) => ({ ...z, tables: z.tables.filter((t) => t.id !== table.id) }));
+                actions.deleteTable(table.id);
                 setSel(null);
               }}>Remove table</Btn>
             </div>
@@ -966,7 +767,7 @@ function Designer({ venue, zoneId, setZoneId, updateVenue, orders, now, flash })
 
 /* --------------------------------------------------------------- price list */
 
-function PriceList({ articles, setArticles, currency }) {
+function PriceList({ articles, currency, actions }) {
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("All");
   const [editing, setEditing] = useState(null);
@@ -988,7 +789,7 @@ function PriceList({ articles, setArticles, currency }) {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find an article"
             style={{ width: "100%", background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9, padding: "9px 12px 9px 32px", color: C.cream, fontFamily: SANS, fontSize: 13, outline: "none" }} />
         </div>
-        <Btn variant="solid" icon={Plus} onClick={() => setEditing({ id: uid("a"), name: "", category: cat === "All" ? "Beer" : cat, cost: 0, price: 0, active: true })}>New article</Btn>
+        <Btn variant="solid" icon={Plus} onClick={() => setEditing({ id: null, name: "", category: cat === "All" ? "Beer" : cat, cost: 0, price: 0, active: true })}>New article</Btn>
       </div>
 
       <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 12 }}>
@@ -1032,7 +833,7 @@ function PriceList({ articles, setArticles, currency }) {
       {editing && (
         <Modal onClose={() => setEditing(null)} width={380}>
           <div style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 16, marginBottom: 16 }}>
-            {articles.some((a) => a.id === editing.id) ? "Edit article" : "New article"}
+            {editing.id ? "Edit article" : "New article"}
           </div>
           <div style={{ display: "grid", gap: 12 }}>
             <Field label="Name" value={editing.name} onChange={(v) => setEditing({ ...editing, name: v })} placeholder="Draft lager 0.5" />
@@ -1047,13 +848,17 @@ function PriceList({ articles, setArticles, currency }) {
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
-            {articles.some((a) => a.id === editing.id) && (
-              <Btn variant="danger" icon={Trash2} onClick={() => { setArticles(articles.filter((a) => a.id !== editing.id)); setEditing(null); }} />
+            {editing.id && (
+              <Btn variant="danger" icon={Trash2} onClick={() => { actions.removeArticle(editing.id); setEditing(null); }} />
             )}
             <Btn variant="ghost" style={{ flex: 1 }} onClick={() => setEditing(null)}>Cancel</Btn>
             <Btn variant="solid" icon={Check} style={{ flex: 1 }} onClick={() => {
-              const clean = { ...editing, name: editing.name.trim() || "Untitled", cost: round2(Number(editing.cost) || 0), price: round2(Number(editing.price) || 0) };
-              setArticles(articles.some((a) => a.id === clean.id) ? articles.map((a) => (a.id === clean.id ? clean : a)) : [...articles, clean]);
+              actions.saveArticle({
+                ...editing,
+                name: editing.name.trim() || "Untitled",
+                cost: round2(Number(editing.cost) || 0),
+                price: round2(Number(editing.price) || 0),
+              });
               setEditing(null);
             }}>Save</Btn>
           </div>
@@ -1065,12 +870,9 @@ function PriceList({ articles, setArticles, currency }) {
 
 /* ------------------------------------------------------------ owner reports */
 
-function Reports({ sales, orders, venue, onSettleUnpaid }) {
-  const [range, setRange] = useState("today");
+function Reports({ bills: allBills, unpaid, orders, venue, range, setRange, loading, onSettleUnpaid }) {
   const cur = venue.currency;
-  const now = Date.now();
-  const from = range === "today" ? new Date().setHours(0, 0, 0, 0) : now - 7 * DAY;
-  const bills = sales.filter((b) => b.venueId === venue.id && b.closedAt >= from);
+  const bills = allBills;
   const paidBills = bills.filter((b) => b.paid);
 
   const revenue = round2(paidBills.reduce((s, b) => s + b.total, 0));
@@ -1079,7 +881,6 @@ function Reports({ sales, orders, venue, onSettleUnpaid }) {
   const margin = revenue ? (profit / revenue) * 100 : 0;
   const avg = paidBills.length ? revenue / paidBills.length : 0;
 
-  const unpaid = sales.filter((b) => b.venueId === venue.id && !b.paid);
   const unpaidTotal = round2(unpaid.reduce((s, b) => s + b.total, 0));
 
   const open = Object.values(orders).filter((o) => o.venueId === venue.id);
@@ -1119,7 +920,7 @@ function Reports({ sales, orders, venue, onSettleUnpaid }) {
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
         {[["today", "Today"], ["week", "Last 7 days"]].map(([k, l]) => (
           <button key={k} onClick={() => setRange(k)} style={{
             padding: "7px 14px", borderRadius: 9, border: `1px solid ${range === k ? C.brass : C.line}`,
@@ -1127,6 +928,7 @@ function Reports({ sales, orders, venue, onSettleUnpaid }) {
             fontFamily: SANS, fontWeight: 600, fontSize: 13, cursor: "pointer",
           }}>{l}</button>
         ))}
+        {loading && <Loader2 size={14} color={C.sageDim} className="animate-spin" />}
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(148px,1fr))", gap: 12 }}>
@@ -1223,22 +1025,18 @@ function Reports({ sales, orders, venue, onSettleUnpaid }) {
 
 /* --------------------------------------------------------------- owner team */
 
-function Team({ venue, updateVenue, flash }) {
+function Team({ venue, staff, flash, actions }) {
   const [editing, setEditing] = useState(null);
   const plan = PLANS[venue.subscription.plan];
 
-  const save = (s) => {
-    const pin = String(s.pin).replace(/\D/g, "").slice(0, 4);
-    if (pin.length !== 4) return flash("A PIN must be 4 digits.");
-    // Only this bar's PINs matter — other bars are on their own devices.
-    const taken = [{ id: venue.id, pin: venue.ownerPin }, ...venue.staff.map((x) => ({ id: x.id, pin: x.pin }))];
-    if (taken.some((p) => p.pin === pin && p.id !== s.id)) return flash("Someone here already uses that PIN. Pick another.");
-    const exists = venue.staff.some((x) => x.id === s.id);
-    updateVenue({
-      ...venue,
-      staff: exists ? venue.staff.map((x) => (x.id === s.id ? { ...s, pin } : x)) : [...venue.staff, { ...s, pin }],
-    });
-    setEditing(null);
+  // The database rejects a PIN already used at this bar, so we don't duplicate
+  // that check here — it would only ever be a weaker copy.
+  const save = async (s) => {
+    const pin = String(s.pin || "").replace(/\D/g, "").slice(0, 4);
+    if (!s.id && pin.length !== 4) return flash("A PIN must be 4 digits.");
+    if (pin && pin.length !== 4) return flash("A PIN must be 4 digits.");
+    const ok = await actions.saveStaff({ id: s.id, name: s.name, pin: pin || null });
+    if (ok) setEditing(null);
   };
 
   return (
@@ -1251,8 +1049,8 @@ function Team({ venue, updateVenue, flash }) {
           </div>
         </div>
         <Btn variant="solid" icon={UserPlus} onClick={() => {
-          if (venue.staff.length >= plan.maxStaff) return flash(`${plan.name} covers ${plan.maxStaff} waiters.`);
-          setEditing({ id: uid("s"), name: "", pin: "" });
+          if (staff.length >= plan.maxStaff) return flash(`${plan.name} covers ${plan.maxStaff} waiters.`);
+          setEditing({ id: null, name: "", pin: "" });
         }}>Add waiter</Btn>
       </div>
 
@@ -1265,9 +1063,9 @@ function Team({ venue, updateVenue, flash }) {
             <div style={{ fontFamily: SANS, fontSize: 14, color: C.cream, fontWeight: 600 }}>{venue.ownerName}</div>
             <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>Owner — sees money, floor plan and prices</div>
           </div>
-          <span style={{ fontFamily: MONO, fontSize: 14, color: C.sage, letterSpacing: "0.25em" }}>{venue.ownerPin}</span>
+          <span style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>PIN set at setup</span>
         </div>
-        {venue.staff.map((s) => (
+        {staff.map((s) => (
           <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: `1px solid ${C.line}55` }}>
             <div style={{ width: 34, height: 34, borderRadius: 9, background: C.raise, border: `1px solid ${C.line}`, display: "grid", placeItems: "center", fontFamily: MONO, color: C.sage, fontSize: 13 }}>
               {s.name.slice(0, 1).toUpperCase() || "?"}
@@ -1276,12 +1074,11 @@ function Team({ venue, updateVenue, flash }) {
               <div style={{ fontFamily: SANS, fontSize: 14, color: C.cream, fontWeight: 600 }}>{s.name}</div>
               <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>Waiter — orders and payments only</div>
             </div>
-            <span style={{ fontFamily: MONO, fontSize: 14, color: C.sage, letterSpacing: "0.25em" }}>{s.pin}</span>
-            <Btn size="sm" variant="bare" icon={KeyRound} onClick={() => setEditing({ ...s })} />
-            <Btn size="sm" variant="bare" icon={Trash2} style={{ color: C.sageDim }} onClick={() => updateVenue({ ...venue, staff: venue.staff.filter((x) => x.id !== s.id) })} />
+            <Btn size="sm" variant="bare" icon={KeyRound} title="Change PIN" onClick={() => setEditing({ id: s.id, name: s.name, pin: "" })} />
+            <Btn size="sm" variant="bare" icon={Trash2} style={{ color: C.sageDim }} onClick={() => actions.removeStaff(s.id)} />
           </div>
         ))}
-        {!venue.staff.length && <div style={{ padding: 20, fontFamily: SANS, fontSize: 13, color: C.sageDim }}>No waiters yet. Add one so they can start taking orders.</div>}
+        {!staff.length && <div style={{ padding: 20, fontFamily: SANS, fontSize: 13, color: C.sageDim }}>No waiters yet. Add one so they can start taking orders.</div>}
       </div>
 
       <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
@@ -1289,7 +1086,7 @@ function Team({ venue, updateVenue, flash }) {
           <div style={{ fontFamily: SANS, fontSize: 14, color: C.cream, fontWeight: 600 }}>Let waiters give discounts</div>
           <div style={{ fontFamily: SANS, fontSize: 12, color: C.sageDim, marginTop: 3 }}>Off by default, so nobody discounts a bill without you.</div>
         </div>
-        <button onClick={() => updateVenue({ ...venue, allowStaffDiscount: !venue.allowStaffDiscount })} style={{
+        <button onClick={() => actions.setDiscountPolicy(!venue.allowStaffDiscount)} style={{
           width: 50, height: 28, borderRadius: 99, border: `1px solid ${venue.allowStaffDiscount ? C.brass : C.line2}`,
           background: venue.allowStaffDiscount ? "rgba(230,180,80,0.2)" : C.raise, cursor: "pointer", position: "relative", padding: 0,
         }}>
@@ -1303,11 +1100,11 @@ function Team({ venue, updateVenue, flash }) {
       {editing && (
         <Modal onClose={() => setEditing(null)} width={340}>
           <div style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 16, marginBottom: 16 }}>
-            {venue.staff.some((s) => s.id === editing.id) ? "Edit waiter" : "Add waiter"}
+            {editing.id ? "Edit waiter" : "Add waiter"}
           </div>
           <div style={{ display: "grid", gap: 12 }}>
             <Field label="Name" value={editing.name} onChange={(v) => setEditing({ ...editing, name: v })} placeholder="Ana" />
-            <Field label="4-digit PIN" value={editing.pin} onChange={(v) => setEditing({ ...editing, pin: v.replace(/\D/g, "").slice(0, 4) })} mono maxLength={4} placeholder="1234" />
+            <Field label={editing.id ? "New PIN (leave blank to keep)" : "4-digit PIN"} value={editing.pin} onChange={(v) => setEditing({ ...editing, pin: v.replace(/\D/g, "").slice(0, 4) })} mono maxLength={4} placeholder="1234" />
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
             <Btn variant="ghost" style={{ flex: 1 }} onClick={() => setEditing(null)}>Cancel</Btn>
@@ -1321,7 +1118,7 @@ function Team({ venue, updateVenue, flash }) {
 
 /* ------------------------------------------------------------ platform side */
 
-function AdminBars({ venues, setVenues, sales, orders, now, openAsOwner, allCodes, flash }) {
+function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loading }) {
   const [detail, setDetail] = useState(null);
   const [adding, setAdding] = useState(null);
 
@@ -1331,24 +1128,9 @@ function AdminBars({ venues, setVenues, sales, orders, now, openAsOwner, allCode
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
   const collected = venues.reduce((s, v) => s + v.subscription.payments.filter((p) => p.paidAt >= monthStart).reduce((x, p) => x + p.amount, 0), 0);
 
-  const recordPayment = (v) => {
-    const s = v.subscription;
-    const base = Math.max(now, s.nextDueAt);
-    setVenues((prev) => prev.map((x) => x.id === v.id ? {
-      ...x, subscription: {
-        ...s, suspended: false, trialEndsAt: null, nextDueAt: addMonth(base),
-        payments: [...s.payments, { id: uid("p"), amount: s.price, paidAt: now, note: "Recorded manually" }],
-      },
-    } : x));
-    flash(`${v.name} marked paid until ${shortDate(addMonth(base))}`);
-  };
-  const toggleSuspend = (v) => {
-    setVenues((prev) => prev.map((x) => x.id === v.id ? { ...x, subscription: { ...x.subscription, suspended: !x.subscription.suspended } } : x));
-    flash(v.subscription.suspended ? `${v.name} reactivated` : `${v.name} suspended — nobody there can sign in`);
-  };
-  const changePlan = (v, planId) => {
-    setVenues((prev) => prev.map((x) => x.id === v.id ? { ...x, subscription: { ...x.subscription, plan: planId, price: PLANS[planId].price } } : x));
-  };
+  const recordPayment = (v) => actions.recordPayment(v);
+  const toggleSuspend = (v) => actions.toggleSuspend(v);
+  const changePlan = (v, planId) => actions.changePlan(v, planId);
 
   return (
     <div>
@@ -1362,7 +1144,7 @@ function AdminBars({ venues, setVenues, sales, orders, now, openAsOwner, allCode
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 12 }}>
         <Eyebrow>Your bars</Eyebrow>
         <Btn variant="solid" icon={Plus} onClick={() => setAdding({
-          id: uid("v"), name: "", address: "", currency: "€", ownerName: "", ownerPin: "",
+          name: "", address: "", currency: "€", ownerName: "", ownerPin: "",
           plan: "starter", trialDays: 14,
         })}>Add a bar</Btn>
       </div>
@@ -1396,7 +1178,7 @@ function AdminBars({ venues, setVenues, sales, orders, now, openAsOwner, allCode
               <div style={{ minWidth: 88 }}>
                 <Eyebrow>Their day</Eyebrow>
                 <div style={{ fontFamily: MONO, fontSize: 13, color: C.sage, marginTop: 3 }}>
-                  {money(round2(today.reduce((s, b) => s + b.total, 0)), v.currency)}{openN ? ` · ${openN} open` : ""}
+                  {money(round2(todayTotal), v.currency)}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
@@ -1452,19 +1234,16 @@ function AdminBars({ venues, setVenues, sales, orders, now, openAsOwner, allCode
               <span style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim, flex: 1, lineHeight: 1.45 }}>
                 Unique across every bar you sell to. Regenerating it signs out their devices.
               </span>
-              <Btn size="sm" icon={RotateCw} title="Issue a new code" onClick={() => {
-                const code = newBarCode(allCodes);
-                setVenues((prev) => prev.map((x) => (x.id === v.id ? { ...x, code } : x)));
-                flash(`${v.name} now uses bar code ${code}`);
-              }} />
+              <Btn size="sm" icon={RotateCw} title="Issue a new code" onClick={() => actions.regenerateCode(v)} />
             </div>
 
-            <Eyebrow style={{ marginBottom: 8 }}>PINs inside this bar</Eyebrow>
-            <div style={{ background: C.ink, border: `1px dashed ${C.line2}`, borderRadius: 10, padding: 12, marginBottom: 16, fontFamily: MONO, fontSize: 12.5, color: C.sage, lineHeight: 1.9 }}>
-              <div><span style={{ color: C.brass }}>{v.ownerPin}</span> — {v.ownerName} (owner)</div>
-              {v.staff.map((s) => <div key={s.id}><span style={{ color: C.brass }}>{s.pin}</span> — {s.name} (waiter)</div>)}
-              <div style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim, marginTop: 6 }}>
-                These only work on a device paired to {v.name}. Other bars may use the same numbers.
+            <Eyebrow style={{ marginBottom: 8 }}>People at this bar</Eyebrow>
+            <div style={{ background: C.ink, border: `1px dashed ${C.line2}`, borderRadius: 10, padding: 12, marginBottom: 16, fontFamily: SANS, fontSize: 12.5, color: C.sage, lineHeight: 1.8 }}>
+              <div>{v.ownerName} — owner</div>
+              {v.staff.map((s) => <div key={s.id}>{s.name} — waiter</div>)}
+              <div style={{ fontSize: 11, color: C.sageDim, marginTop: 6 }}>
+                PINs are hashed and can't be read back — not by you either. The owner
+                can reset one from their Team tab.
               </div>
             </div>
 
@@ -1516,24 +1295,13 @@ function AdminBars({ venues, setVenues, sales, orders, now, openAsOwner, allCode
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
             <Btn variant="ghost" style={{ flex: 1 }} onClick={() => setAdding(null)}>Cancel</Btn>
-            <Btn variant="solid" icon={Check} style={{ flex: 1 }} onClick={() => {
-              const pin = adding.ownerPin;
-              if (pin.length !== 4) return flash("The owner needs a 4-digit PIN.");
-              const code = newBarCode(allCodes);
-              const days = Math.max(0, Number(adding.trialDays) || 0);
-              const trialEnd = days ? now + days * DAY : null;
-              setVenues((prev) => [...prev, {
-                id: adding.id, name: adding.name.trim() || "New bar", address: adding.address,
-                currency: adding.currency || "€", code,
-                ownerName: adding.ownerName.trim() || "Owner", ownerPin: pin, allowStaffDiscount: false, staff: [],
-                subscription: {
-                  plan: adding.plan, price: PLANS[adding.plan].price, startedAt: now,
-                  nextDueAt: trialEnd || now, trialEndsAt: trialEnd, graceDays: 7, suspended: false, payments: [],
-                },
-                zones: [{ id: uid("z"), name: "Main room", tables: [] }],
-              }]);
-              setAdding(null);
-              flash(`${adding.name || "New bar"} added — bar code ${code}, owner PIN ${pin}`);
+            <Btn variant="solid" icon={Check} style={{ flex: 1 }} onClick={async () => {
+              if (!/^[0-9]{4}$/.test(adding.ownerPin)) return flash("The owner needs a 4-digit PIN.");
+              const created = await actions.createBar(adding);
+              if (created) {
+                setAdding(null);
+                flash(`${created.name} added — bar code ${created.code}`);
+              }
             }}>Create bar</Btn>
           </div>
         </Modal>
@@ -1543,181 +1311,301 @@ function AdminBars({ venues, setVenues, sales, orders, now, openAsOwner, allCode
 }
 
 /* ---------------------------------------------------------------------- app */
+/* ---------------------------------------------- platform sign-in (email/pw) */
+
+function PlatformForm({ onSubmit, error, busy }) {
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("");
+  const go = () => email && pw && onSubmit(email, pw);
+  return (
+    <div>
+      <div style={{ display: "grid", gap: 10 }}>
+        <Field label="Email" value={email} onChange={setEmail} type="email" placeholder="you@example.com" />
+        <Field label="Password" value={pw} onChange={setPw} type="password" placeholder="••••••••" />
+      </div>
+      <div style={{ minHeight: 30, textAlign: "center", fontSize: 12.5, color: C.copper, marginTop: 10, lineHeight: 1.4 }}>
+        {error || ""}
+      </div>
+      <Btn variant="solid" size="lg" disabled={busy || !email || !pw} onClick={go}
+        icon={busy ? Loader2 : undefined} style={{ width: "100%" }}>
+        {busy ? "Signing in…" : "Sign in"}
+      </Btn>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------- small screens */
+
+function Splash({ text = "Opening the floor…" }) {
+  return (
+    <div style={{ minHeight: "100vh", background: C.ink, display: "grid", placeItems: "center", padding: 24 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, color: C.sageDim, fontFamily: SANS, fontSize: 14 }}>
+        <Loader2 size={16} className="animate-spin" /> {text}
+      </div>
+    </div>
+  );
+}
+
+function Blocked({ message, onBack }) {
+  return (
+    <div style={{ minHeight: "100vh", background: C.ink, display: "grid", placeItems: "center", padding: 24 }}>
+      <div style={{ maxWidth: 340, textAlign: "center" }}>
+        <AlertTriangle size={26} color={C.copper} style={{ marginBottom: 14 }} />
+        <div style={{ fontFamily: SANS, fontSize: 15, color: C.cream, lineHeight: 1.55 }}>{message}</div>
+        <Btn style={{ marginTop: 18 }} icon={ArrowLeft} onClick={onBack}>Back to sign in</Btn>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- app */
 
 export default function App() {
-  const [ready, setReady] = useState(false);
-  const [platform, setPlatform] = useState({ name: "Backbar", adminPin: "900900" });
-  const [venues, setVenues] = useState([]);
-  const [articles, setArticles] = useState([]);
-  const [orders, setOrders] = useState({});
-  const [sales, setSales] = useState([]);
-  const [session, setSession] = useState(null); // {role, venueId, actorId, actorName, support}
-  const [deviceVenueId, setDeviceVenueId] = useState(null); // which bar this tablet belongs to
+  const [booting, setBooting] = useState(true);
+  const [session, setSession] = useState(null);
+  const [paired, setPaired] = useState(() => loadPairing());
+  const [authBusy, setAuthBusy] = useState(false);
   const [loginError, setLoginError] = useState("");
+
   const [tab, setTab] = useState("floor");
   const [zoneId, setZoneId] = useState(null);
   const [openTableId, setOpenTableId] = useState(null);
+  const [sheetBusy, setSheetBusy] = useState(false);
   const [toast, setToast] = useState(null);
   const now = useNow(20000);
 
+  const flash = useCallback((msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2800);
+  }, []);
+
+  /* ---- restore whatever session survived a refresh ---- */
   useEffect(() => {
     let dead = false;
     (async () => {
-      const cfg = await sget(K_CFG);
-      const ord = await sget(K_ORD);
-      const sal = await sget(K_SAL);
-      const dev = await sget(K_DEV);
-      if (dead) return;
-      if (dev && dev.venueId) setDeviceVenueId(dev.venueId);
-      if (cfg && cfg.venues && cfg.venues.length) {
-        setPlatform(cfg.platform || { name: "Backbar", adminPin: "900900" });
-        setVenues(cfg.venues);
-        setArticles(cfg.articles || seedArticles());
-        setOrders(ord || {});
-        setSales(sal || []);
-      } else {
-        const v = seedVenues(), a = seedArticles();
-        setVenues(v); setArticles(a);
-        setOrders(seedOrders(v, a));
-        setSales(seedSales(v, a));
+      const staff = loadStaffSession();
+      if (staff) {
+        if (!dead) { setSession(staff); setBooting(false); }
+        return;
       }
-      setReady(true);
+      const platform = await restorePlatformSession().catch(() => null);
+      if (!dead) {
+        if (platform) { setSession(platform); setTab("bars"); }
+        setBooting(false);
+      }
     })();
     return () => { dead = true; };
   }, []);
 
-  const saveT = useRef(null);
-  useEffect(() => {
-    if (!ready) return;
-    clearTimeout(saveT.current);
-    saveT.current = setTimeout(() => {
-      sset(K_CFG, { platform, venues, articles });
-      sset(K_ORD, orders);
-      sset(K_SAL, sales);
-    }, 500);
-    return () => clearTimeout(saveT.current);
-  }, [ready, platform, venues, articles, orders, sales]);
-
-  useEffect(() => {
-    if (ready) sset(K_DEV, { venueId: deviceVenueId });
-  }, [ready, deviceVenueId]);
-
-  const flash = useCallback((msg) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 2600);
-  }, []);
-
-  const allCodes = useMemo(() => venues.map((v) => v.code), [venues]);
-  const pairedVenue = useMemo(() => venues.find((v) => v.id === deviceVenueId) || null, [venues, deviceVenueId]);
-
-  // Step 1: tie this device to one bar. Bar codes are issued by the platform,
-  // so they are unique everywhere.
-  const pairDevice = useCallback((code) => {
-    const v = venues.find((x) => x.code === code);
-    if (!v) return setLoginError("No bar uses that code");
-    const st = subState(v, Date.now());
-    if (!canOperate(st)) {
-      return setLoginError(st === "suspended"
-        ? `${v.name} is suspended. Contact ${platform.name}.`
-        : `${v.name} has an unpaid subscription. Contact ${platform.name}.`);
-    }
-    setLoginError("");
-    setDeviceVenueId(v.id);
-    flash(`This device is set up for ${v.name}`);
-  }, [venues, platform, flash]);
-
-  // Step 2: PINs are only ever checked inside the paired bar, so two bars
-  // can both hand a waiter 1234 without ever colliding.
-  const resolvePin = useCallback((pin) => {
-    const v = pairedVenue;
-    if (!v) return setLoginError("Set up this device first");
-    const st = subState(v, Date.now());
-    if (!canOperate(st)) return setLoginError(`${v.name} is locked. Ask the owner.`);
-    setLoginError("");
-    if (v.ownerPin === pin) {
-      setSession({ role: "owner", venueId: v.id, actorId: v.id, actorName: v.ownerName });
-      setZoneId(v.zones[0]?.id); setTab("floor");
-      return;
-    }
-    const s = v.staff.find((x) => x.pin === pin);
-    if (s) {
-      setSession({ role: "waiter", venueId: v.id, actorId: s.id, actorName: s.name });
-      setZoneId(v.zones[0]?.id); setTab("floor");
-      return;
-    }
-    setLoginError(`Nobody at ${v.name} uses that PIN`);
-  }, [pairedVenue]);
-
-  const resolvePlatform = useCallback((code) => {
-    if (code !== platform.adminPin) return setLoginError("That is not your platform code");
-    setLoginError("");
-    setSession({ role: "platform", actorName: "Platform" });
-    setTab("bars");
-  }, [platform]);
-
-  const venue = session?.venueId ? venues.find((v) => v.id === session.venueId) : null;
-  useEffect(() => {
-    if (venue && (!zoneId || !venue.zones.some((z) => z.id === zoneId))) setZoneId(venue.zones[0]?.id);
-  }, [venue, zoneId]);
-
-  const zone = venue?.zones.find((z) => z.id === zoneId) || venue?.zones[0];
-  const table = zone?.tables.find((t) => t.id === openTableId);
-  const orderKey = venue && table ? `${venue.id}/${table.id}` : null;
-  const updateVenue = (v) => setVenues((prev) => prev.map((x) => (x.id === v.id ? v : x)));
-
-  const commitOrder = (lines, guests) => {
-    if (!orderKey) return;
-    setOrders((prev) => {
-      const next = { ...prev };
-      if (!lines.length) delete next[orderKey];
-      else next[orderKey] = {
-        key: orderKey, venueId: venue.id, tableId: table.id, tableLabel: table.label, zoneId: zone.id,
-        guests, openedAt: prev[orderKey]?.openedAt || Date.now(),
-        staffId: prev[orderKey]?.staffId || session.actorId, staffName: prev[orderKey]?.staffName || session.actorName,
-        lines,
-      };
-      return next;
-    });
+  /* ---- a shift token expires mid-service; drop to the PIN pad, don't error ---- */
+  useEffect(() => onExpired(session, () => {
+    setSession(null);
     setOpenTableId(null);
-    flash(`Table ${table.label} saved`);
+    setLoginError("Your shift session ended. Enter your PIN again.");
+  }), [session]);
+
+  /* ---- the bar's live data ---- */
+  const { data, loading, error: dataError, refresh, mutate, clearError } = useBarData(
+    session && session.role !== "platform" ? session : null
+  );
+  const client = useMemo(() => (session ? clientFor(session) : null), [session]);
+
+  const venue = data?.venue || null;
+  const zones = data?.zones || [];
+  const articles = data?.articles || [];
+  const orders = data?.orders || {};
+
+  useEffect(() => {
+    if (zones.length && (!zoneId || !zones.some((z) => z.id === zoneId))) setZoneId(zones[0].id);
+  }, [zones, zoneId]);
+
+  const zone = zones.find((z) => z.id === zoneId) || zones[0] || null;
+  const table = zone?.tables.find((t) => t.id === openTableId) || null;
+
+  // Orders are keyed by id; the floor needs them keyed by table.
+  const ordersByTable = useMemo(() => {
+    const m = {};
+    Object.values(orders).forEach((o) => { m[`${o.venueId}/${o.tableId}`] = o; });
+    return m;
+  }, [orders]);
+  const openOrder = table ? ordersByTable[`${venue?.id}/${table.id}`] : null;
+
+  /* ---- auth handlers ---- */
+  const doPair = async (code) => {
+    setAuthBusy(true); setLoginError("");
+    try {
+      setPaired(await pairDevice(code));
+    } catch (e) { setLoginError(e.message); }
+    finally { setAuthBusy(false); }
   };
 
-  const settleOrder = (lines, method, paid, discount, total, cost) => {
-    const existing = orders[orderKey];
-    setSales((prev) => [...prev, {
-      id: uid("b"), venueId: venue.id, tableLabel: table.label, closedAt: Date.now(),
-      method, paid, discount, lines, total, cost, profit: round2(total - cost),
-      staffId: existing?.staffId || session.actorId, staffName: existing?.staffName || session.actorName,
-    }]);
-    setOrders((prev) => { const n = { ...prev }; delete n[orderKey]; return n; });
-    setOpenTableId(null);
-    flash(paid ? `Table ${table.label} paid — ${money(total, venue.currency)}` : `Table ${table.label} closed unpaid — sent to the owner`);
+  const doPin = async (pin) => {
+    setAuthBusy(true); setLoginError("");
+    try {
+      const s = await signInStaff(pin);
+      setSession(s); setTab("floor");
+    } catch (e) { setLoginError(e.message); }
+    finally { setAuthBusy(false); }
   };
 
-  const settleUnpaid = (billId, method) => {
-    setSales((prev) => prev.map((b) => (b.id === billId ? { ...b, paid: true, method, settledAt: Date.now() } : b)));
-    flash("Bill marked as paid");
+  const doPlatform = async (email, pw) => {
+    setAuthBusy(true); setLoginError("");
+    try {
+      setSession(await signInPlatform(email, pw)); setTab("bars");
+    } catch (e) { setLoginError(e.message); }
+    finally { setAuthBusy(false); }
   };
 
-  if (!ready) {
-    return (
-      <div style={{ minHeight: "100vh", background: C.ink, display: "grid", placeItems: "center" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, color: C.sageDim, fontFamily: SANS, fontSize: 14 }}>
-          <Loader2 size={16} className="animate-spin" /> Opening the floor…
-        </div>
-      </div>
-    );
-  }
+  const doSignOut = async () => {
+    await signOut();
+    setSession(null); setOpenTableId(null); setLoginError("");
+  };
+
+  /* ---- actions the screens call ---- */
+  const guard = useCallback(async (fn, okMsg) => {
+    try {
+      const out = await fn(client);
+      refresh();
+      if (okMsg) flash(okMsg);
+      return out ?? true;
+    } catch (e) {
+      flash(e.message);
+      return null;
+    }
+  }, [client, refresh, flash]);
+
+  const barActions = useMemo(() => ({
+    saveTable: (zid, t) => guard((c) => api.upsertTable(c, venue.id, zid, t)),
+    moveTable: (id, x, y) => api.moveTable(client, id, x, y).catch((e) => flash(e.message)),
+    deleteTable: (id) => guard((c) => api.deleteTable(c, id)),
+    saveZone: (z) => guard((c) => api.upsertZone(c, venue.id, z)),
+    deleteZone: (id) => guard((c) => api.deleteZone(c, id)),
+    saveArticle: (a) => guard((c) => api.upsertArticle(c, venue.id, a), "Price list updated"),
+    removeArticle: (id) => guard((c) => api.deleteArticle(c, id), "Article removed"),
+    saveStaff: (s) => guard((c) => api.upsertStaff(c, venue.id, s), "Team updated"),
+    removeStaff: (id) => guard((c) => api.deactivateStaff(c, id)),
+    setDiscountPolicy: (v) => guard((c) => api.setDiscountPolicy(c, venue.id, v)),
+  }), [guard, client, venue, flash]);
+
+  /* ---- orders ---- */
+  const commitOrder = async (lines, guests) => {
+    setSheetBusy(true);
+    try {
+      await api.saveOrder(client, {
+        orderId: openOrder?.id, barId: venue.id, table, guests, lines,
+        staff: { id: session.actorId, name: session.actorName },
+      });
+      await refresh();
+      setOpenTableId(null);
+      flash(`Table ${table.label} saved`);
+    } catch (e) { flash(e.message); }
+    finally { setSheetBusy(false); }
+  };
+
+  const settleOrder = async (method, paid, discount) => {
+    if (!openOrder) return flash("Save the order before closing it.");
+    setSheetBusy(true);
+    try {
+      const bill = await api.closeBill(client, { orderId: openOrder.id, method, paid, discount });
+      await refresh();
+      setOpenTableId(null);
+      flash(paid
+        ? `Table ${table.label} paid — ${money(bill.total, venue.currency)}`
+        : `Table ${table.label} closed unpaid — sent to the owner`);
+    } catch (e) { flash(e.message); }
+    finally { setSheetBusy(false); }
+  };
+
+  /* ---- owner reports ---- */
+  const [range, setRange] = useState("today");
+  const [bills, setBills] = useState([]);
+  const [unpaid, setUnpaid] = useState([]);
+  const [billsLoading, setBillsLoading] = useState(false);
+
+  const loadReports = useCallback(async () => {
+    if (!client || !venue || session?.role !== "owner") return;
+    setBillsLoading(true);
+    try {
+      const from = range === "today"
+        ? new Date(new Date().setHours(0, 0, 0, 0)).toISOString()
+        : new Date(Date.now() - 7 * DAY).toISOString();
+      const [b, u] = await Promise.all([
+        api.loadBills(client, venue.id, from),
+        api.loadUnpaidBills(client, venue.id),
+      ]);
+      setBills(b); setUnpaid(u);
+    } catch (e) { flash(e.message); }
+    finally { setBillsLoading(false); }
+  }, [client, venue, session, range, flash]);
+
+  useEffect(() => {
+    if (tab === "reports") loadReports();
+  }, [tab, loadReports]);
+
+  const settleUnpaid = async (billId, method) => {
+    try {
+      await api.settleBill(client, billId, method);
+      await loadReports();
+      flash("Bill marked as paid");
+    } catch (e) { flash(e.message); }
+  };
+
+  /* ---- platform dashboard ---- */
+  const [bars, setBars] = useState([]);
+  const [todayByBar, setTodayByBar] = useState({});
+  const [barsLoading, setBarsLoading] = useState(false);
+
+  const loadPlatform = useCallback(async () => {
+    if (session?.role !== "platform") return;
+    setBarsLoading(true);
+    try {
+      const since = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+      const [list, totals] = await Promise.all([api.listBars(), api.platformDaySummary(since)]);
+      setBars(list); setTodayByBar(totals);
+    } catch (e) { flash(e.message); }
+    finally { setBarsLoading(false); }
+  }, [session, flash]);
+
+  useEffect(() => { loadPlatform(); }, [loadPlatform]);
+
+  const platformActions = useMemo(() => {
+    const run = async (fn, msg) => {
+      try { const r = await fn(); await loadPlatform(); if (msg) flash(msg); return r; }
+      catch (e) { flash(e.message); return null; }
+    };
+    return {
+      createBar: (d) => run(() => api.createBar({
+        name: d.name, address: d.address, currency: d.currency,
+        ownerName: d.ownerName, ownerPin: d.ownerPin,
+        plan: d.plan, trialDays: Number(d.trialDays) || 0,
+      })),
+      recordPayment: (v) => run(() => api.recordPayment(v.id), `${v.name} marked paid`),
+      toggleSuspend: (v) => run(
+        () => api.setSuspended(v.id, !v.subscription.suspended),
+        v.subscription.suspended ? `${v.name} reactivated` : `${v.name} suspended — nobody there can sign in`
+      ),
+      changePlan: (v, plan) => run(() => api.setPlan(v.id, plan)),
+      regenerateCode: (v) => run(async () => {
+        const code = await api.regenerateBarCode(v.id);
+        flash(`${v.name} now uses bar code ${code}`);
+      }),
+    };
+  }, [loadPlatform, flash]);
+
+  /* ---- render ---- */
+
+  if (booting) return <Splash text="Starting up…" />;
 
   if (!session) {
     return (
       <AuthScreen
-        platformName={platform.name}
-        pairedVenue={pairedVenue}
-        onPair={pairDevice}
-        onUnpair={() => setDeviceVenueId(null)}
-        onPin={resolvePin}
-        onPlatform={resolvePlatform}
+        platformName="Backbar"
+        pairedVenue={paired}
+        busy={authBusy}
+        onPair={doPair}
+        onUnpair={() => { clearPairing(); setPaired(null); }}
+        onPin={doPin}
+        onPlatform={doPlatform}
         error={loginError}
         clearError={() => setLoginError("")}
       />
@@ -1728,6 +1616,19 @@ export default function App() {
   const isOwner = session.role === "owner";
   const isWaiter = session.role === "waiter";
 
+  if (!isPlatform && loading && !data) return <Splash />;
+
+  if (!isPlatform && dataError && !data) {
+    return (
+      <Blocked
+        message={dataError}
+        onBack={() => { clearStaffSession(); setSession(null); clearError(); }}
+      />
+    );
+  }
+
+  if (!isPlatform && (!venue || !zone)) return <Splash />;
+
   const tabs = isPlatform
     ? [["bars", "Bars & billing", Store]]
     : isOwner
@@ -1735,7 +1636,7 @@ export default function App() {
     : [["floor", "Floor", LayoutGrid]];
   const currentTab = tabs.some((t) => t[0] === tab) ? tab : tabs[0][0];
 
-  const openHere = venue ? Object.values(orders).filter((o) => o.venueId === venue.id) : [];
+  const openHere = Object.values(orders);
   const openValue = round2(openHere.reduce((s, o) => s + o.lines.reduce((x, l) => x + l.price * l.qty, 0), 0));
   const myOpen = isWaiter ? openHere.filter((o) => o.staffId === session.actorId) : openHere;
   const st = venue ? subState(venue, now) : null;
@@ -1755,13 +1656,13 @@ export default function App() {
       {session.support && (
         <div style={{ background: "rgba(230,180,80,0.12)", borderBottom: `1px solid ${C.brassDim}`, padding: "8px 18px", display: "flex", alignItems: "center", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
           <ShieldCheck size={14} color={C.brass} />
-          <span style={{ fontSize: 12.5, color: C.brass }}>Support session — you are inside {venue.name} as the owner.</span>
-          <Btn size="sm" icon={ArrowLeft} onClick={() => { setSession({ role: "platform", actorName: "Platform" }); setTab("bars"); }}>Back to your dashboard</Btn>
+          <span style={{ fontSize: 12.5, color: C.brass }}>Support session — inside {venue.name} as the owner.</span>
+          <Btn size="sm" icon={ArrowLeft} onClick={doSignOut}>Back to your dashboard</Btn>
         </div>
       )}
 
       {isOwner && st === "past_due" && (
-        <div style={{ background: "rgba(212,103,74,0.12)", borderBottom: `1px solid rgba(212,103,74,0.4)`, padding: "9px 18px", display: "flex", alignItems: "center", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+        <div style={{ background: "rgba(212,103,74,0.12)", borderBottom: "1px solid rgba(212,103,74,0.4)", padding: "9px 18px", display: "flex", alignItems: "center", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
           <AlertTriangle size={14} color={C.copper} />
           <span style={{ fontSize: 12.5, color: C.copper }}>
             Payment was due {shortDate(venue.subscription.nextDueAt)}. The app stops in {(venue.subscription.graceDays ?? 7) - daysBetween(now, venue.subscription.nextDueAt)} days.
@@ -1776,7 +1677,7 @@ export default function App() {
               <Wine size={15} color={C.brass} />
             </div>
             <div>
-              <div style={{ fontWeight: 800, fontSize: 14, letterSpacing: "0.18em", color: C.cream }}>{platform.name.toUpperCase()}</div>
+              <div style={{ fontWeight: 800, fontSize: 14, letterSpacing: "0.18em", color: C.cream }}>BACKBAR</div>
               <div style={{ fontSize: 10.5, color: C.sageDim, letterSpacing: "0.1em" }}>
                 {isPlatform ? "PLATFORM DASHBOARD" : venue.name.toUpperCase()}
               </div>
@@ -1792,6 +1693,8 @@ export default function App() {
             </div>
           )}
 
+          {!isPlatform && loading && <Loader2 size={14} color={C.sageDim} className="animate-spin" />}
+
           <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "5px 6px 5px 11px", borderRadius: 10, background: C.raise, border: `1px solid ${C.line}` }}>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: 12.5, fontWeight: 700, color: C.cream, lineHeight: 1.2 }}>{session.actorName}</div>
@@ -1799,7 +1702,7 @@ export default function App() {
                 {isPlatform ? "You" : isOwner ? "Bar owner" : "Waiter"}
               </div>
             </div>
-            <Btn size="sm" variant="bare" icon={LogOut} title="Sign out" onClick={() => { setSession(null); setOpenTableId(null); }} />
+            <Btn size="sm" variant="bare" icon={LogOut} title="Sign out" onClick={doSignOut} />
           </div>
         </div>
 
@@ -1820,20 +1723,17 @@ export default function App() {
       <main style={{ maxWidth: 1320, margin: "0 auto", padding: "20px 18px 80px" }}>
         {isPlatform && (
           <AdminBars
-            venues={venues} setVenues={setVenues} sales={sales} orders={orders} now={now} allCodes={allCodes} flash={flash}
-            openAsOwner={(vid) => {
-              const v = venues.find((x) => x.id === vid);
-              setSession({ role: "owner", venueId: vid, actorId: vid, actorName: v.ownerName, support: true });
-              setZoneId(v.zones[0]?.id); setTab("floor");
-            }}
+            venues={bars} todayByBar={todayByBar} now={now} loading={barsLoading}
+            flash={flash} actions={platformActions}
+            openAsOwner={() => flash("Sign in with the bar's own code and PIN to view their floor.")}
           />
         )}
 
         {!isPlatform && currentTab === "floor" && (
           <div>
             <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
-              {venue.zones.map((z) => {
-                const n = z.tables.filter((t) => orders[`${venue.id}/${t.id}`]).length;
+              {zones.map((z) => {
+                const n = z.tables.filter((t) => ordersByTable[`${venue.id}/${t.id}`]).length;
                 return (
                   <button key={z.id} onClick={() => setZoneId(z.id)} style={{
                     padding: "8px 14px", borderRadius: 10, border: `1px solid ${z.id === zone.id ? C.brass : C.line}`,
@@ -1849,20 +1749,32 @@ export default function App() {
               <span style={{ marginLeft: "auto", fontFamily: SANS, fontSize: 12, color: C.sageDim }}>Tap a table to take the order</span>
             </div>
 
-            <FloorPlan zone={zone} orders={orders} venueId={venue.id} mode="service" selectedId={null}
-              onSelect={setOpenTableId} onMove={() => {}} currency={venue.currency} now={now} />
+            {zone.tables.length === 0 ? (
+              <div style={{ background: C.panel, border: `1px dashed ${C.line2}`, borderRadius: 16, padding: 40, textAlign: "center" }}>
+                <div style={{ fontFamily: SANS, fontSize: 14, color: C.cream }}>This room has no tables yet.</div>
+                <div style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim, marginTop: 6 }}>
+                  {isOwner ? "Open the Floor designer to lay it out." : "Ask the owner to lay out the floor."}
+                </div>
+                {isOwner && <Btn variant="solid" style={{ marginTop: 16 }} icon={Copy} onClick={() => setTab("design")}>Floor designer</Btn>}
+              </div>
+            ) : (
+              <FloorPlan zone={zone} orders={ordersByTable} venueId={venue.id} mode="service" selectedId={null}
+                onSelect={setOpenTableId} onMove={() => {}} currency={venue.currency} now={now} />
+            )}
 
             {openHere.length > 0 && (
               <div style={{ marginTop: 20 }}>
                 <Eyebrow style={{ marginBottom: 10 }}>Open bills</Eyebrow>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(190px,1fr))", gap: 10 }}>
-                  {openHere.sort((a, b) => a.openedAt - b.openedAt).map((o) => {
+                  {openHere.slice().sort((a, b) => a.openedAt - b.openedAt).map((o) => {
                     const tot = o.lines.reduce((s, l) => s + l.price * l.qty, 0);
                     const stale = now - o.openedAt > 75 * 60000;
                     const mine = o.staffId === session.actorId;
+                    const z = zones.find((zz) => zz.tables.some((t) => t.id === o.tableId));
                     return (
-                      <button key={o.key} onClick={() => { setZoneId(o.zoneId); setOpenTableId(o.tableId); }} style={{
-                        textAlign: "left", background: C.panel, border: `1px solid ${stale ? "rgba(212,103,74,0.4)" : mine && isWaiter ? C.brassDim : C.line}`,
+                      <button key={o.id} onClick={() => { if (z) setZoneId(z.id); setOpenTableId(o.tableId); }} style={{
+                        textAlign: "left", background: C.panel,
+                        border: `1px solid ${stale ? "rgba(212,103,74,0.4)" : mine && isWaiter ? C.brassDim : C.line}`,
                         borderRadius: 12, padding: 13, cursor: "pointer",
                       }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1883,19 +1795,28 @@ export default function App() {
         )}
 
         {isOwner && currentTab === "design" && (
-          <Designer venue={venue} zoneId={zone.id} setZoneId={setZoneId} updateVenue={updateVenue} orders={orders} now={now} flash={flash} />
+          <Designer venue={venue} zones={zones} zoneId={zone.id} setZoneId={setZoneId}
+            orders={ordersByTable} now={now} flash={flash} actions={barActions} />
         )}
-        {isOwner && currentTab === "menu" && <PriceList articles={articles} setArticles={setArticles} currency={venue.currency} />}
-        {isOwner && currentTab === "reports" && <Reports sales={sales} orders={orders} venue={venue} onSettleUnpaid={settleUnpaid} />}
-        {isOwner && currentTab === "team" && <Team venue={venue} updateVenue={updateVenue} flash={flash} />}
+        {isOwner && currentTab === "menu" && (
+          <PriceList articles={articles} currency={venue.currency} actions={barActions} />
+        )}
+        {isOwner && currentTab === "reports" && (
+          <Reports bills={bills} unpaid={unpaid} orders={orders} venue={venue}
+            range={range} setRange={setRange} loading={billsLoading} onSettleUnpaid={settleUnpaid} />
+        )}
+        {isOwner && currentTab === "team" && (
+          <Team venue={venue} staff={data.staff || []} flash={flash} actions={barActions} />
+        )}
       </main>
 
-      {table && orderKey && venue && (
+      {table && venue && (
         <OrderSheet
-          table={table} zone={zone} venue={venue} order={orders[orderKey]} articles={articles} now={now}
+          table={table} zone={zone} venue={venue} order={openOrder} articles={articles} now={now}
           actorName={session.actorName}
           canSeeCost={isOwner}
           canDiscount={isOwner || venue.allowStaffDiscount}
+          busy={sheetBusy}
           onClose={() => setOpenTableId(null)}
           onCommit={commitOrder}
           onSettle={settleOrder}

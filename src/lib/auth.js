@@ -113,6 +113,21 @@ export async function signInPlatform(email, password) {
   return { role: "platform", actorName: data.user.email, userId: data.user.id };
 }
 
+/** Called on every page load. A platform session is a normal Supabase Auth
+    session, so it survives a refresh — but we re-check admin status rather
+    than trusting a stored flag. */
+export async function restorePlatformSession() {
+  const { data } = await supabase.auth.getSession();
+  if (!data?.session) return null;
+  const { data: isAdmin } = await supabase
+    .from("platform_admins")
+    .select("user_id")
+    .eq("user_id", data.session.user.id)
+    .maybeSingle();
+  if (!isAdmin) return null;
+  return { role: "platform", actorName: data.session.user.email, userId: data.session.user.id };
+}
+
 export async function signOut() {
   clearStaffSession();
   await supabase.auth.signOut();
