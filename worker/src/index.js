@@ -151,6 +151,9 @@ export default {
           SUPABASE_SERVICE_ROLE_KEY: !!env.SUPABASE_SERVICE_ROLE_KEY,
           JWT_SECRET: !!env.JWT_SECRET,
         },
+        // Every binding name the Worker can actually see. Names only, no values.
+        // If a secret is set in the wrong panel it simply will not appear here.
+        bindingsTheWorkerSees: Object.keys(env).sort(),
         database: "not tested",
       };
       if (missing.length) {
