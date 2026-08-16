@@ -59,7 +59,12 @@ async function callLogin(payload) {
     body: JSON.stringify(payload),
   });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(body.error || "Could not reach the server");
+  if (!res.ok) {
+    // A non-JSON body means the request never reached the Worker at all —
+    // usually a routing problem, not a login problem.
+    const msg = body.error || `The sign-in service returned ${res.status}. Check /api/health.`;
+    throw new Error(msg);
+  }
   return body;
 }
 

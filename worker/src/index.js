@@ -31,7 +31,16 @@ const MESSAGES = {
   locked: "Too many wrong PINs. Try again in 15 minutes.",
   bad_request: "Malformed request",
   server: "Could not reach the server",
+  misconfigured: "The server is missing its configuration. Check the Worker secrets.",
 };
+
+/* Which of the three runtime secrets are actually present. A misnamed secret
+   is invisible otherwise — env.SUPABASE_SERVICE_ROLE_KEY just reads undefined
+   and every call fails with the same generic error. */
+function missingSecrets(env) {
+  return ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "JWT_SECRET"]
+    .filter((k) => !env[k]);
+}
 
 /* ------------------------------------------------------------------- helpers */
 
@@ -126,12 +135,48 @@ export default {
 
     // run_worker_first only sends /api/* here, but be explicit: anything else
     // that reaches this script gets handed back to the static assets.
-    if (url.pathname !== "/api/auth") {
+    if (url.pathname !== "/api/auth" && url.pathname !== "/api/health") {
       return env.ASSETS ? env.ASSETS.fetch(req) : new Response("Not found", { status: 404 });
     }
 
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+
+    /* GET /api/health — a setup aid. Reports whether each secret exists and
+       whether the database answers. It never returns a secret's value. */
+    if (url.pathname === "/api/health") {
+      const missing = missingSecrets(env);
+      const out = {
+        secrets: {
+          SUPABASE_URL: !!env.SUPABASE_URL,
+          SUPABASE_SERVICE_ROLE_KEY: !!env.SUPABASE_SERVICE_ROLE_KEY,
+          JWT_SECRET: !!env.JWT_SECRET,
+        },
+        database: "not tested",
+      };
+      if (missing.length) {
+        out.ok = false;
+        out.problem = `Missing or misnamed: ${missing.join(", ")}`;
+        return json(out, 200, cors);
+      }
+      try {
+        await rpc(env, "login_is_locked", { p_bar_code: "0000", p_ip: "healthcheck" });
+        out.database = "reachable";
+        out.ok = true;
+      } catch (e) {
+        out.database = "unreachable";
+        out.ok = false;
+        out.problem = e.message;
+      }
+      return json(out, 200, cors);
+    }
+
     if (req.method !== "POST") return json({ error: MESSAGES.bad_request }, 405, cors);
+
+    const missing = missingSecrets(env);
+    if (missing.length) {
+      console.error("backbar auth: missing secrets", missing.join(", "));
+      return json({ error: MESSAGES.misconfigured, missing }, 500, cors);
+    }
 
     let body;
     try {
