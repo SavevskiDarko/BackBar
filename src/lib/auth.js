@@ -97,6 +97,7 @@ export async function signInStaff(pin) {
 
 /** Your own sign-in. Email and password, not a PIN. */
 export async function signInPlatform(email, password) {
+  if (!supabase) throw new Error("The app is not configured to reach Supabase.");
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw new Error("Wrong email or password");
 
@@ -117,6 +118,7 @@ export async function signInPlatform(email, password) {
     session, so it survives a refresh — but we re-check admin status rather
     than trusting a stored flag. */
 export async function restorePlatformSession() {
+  if (!supabase) return null;
   const { data } = await supabase.auth.getSession();
   if (!data?.session) return null;
   const { data: isAdmin } = await supabase
@@ -130,7 +132,7 @@ export async function restorePlatformSession() {
 
 export async function signOut() {
   clearStaffSession();
-  await supabase.auth.signOut();
+  if (supabase) await supabase.auth.signOut();
 }
 
 /* --------------------------------------------------------------------------

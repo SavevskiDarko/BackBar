@@ -6,6 +6,7 @@ import {
   ShieldCheck, UserPlus, AlertTriangle, ArrowLeft, KeyRound, Pause, Play, Wallet,
 } from "lucide-react";
 
+import { configError } from "./lib/supabase";
 import {
   loadPairing, clearPairing, loadStaffSession, clearStaffSession,
   pairDevice, signInStaff, signInPlatform, restorePlatformSession, signOut,
@@ -1593,6 +1594,24 @@ export default function App() {
   }, [loadPlatform, flash]);
 
   /* ---- render ---- */
+
+  if (configError) {
+    return (
+      <div style={{ minHeight: "100vh", background: C.ink, display: "grid", placeItems: "center", padding: 26, fontFamily: SANS }}>
+        <div style={{ maxWidth: 400, textAlign: "center" }}>
+          <AlertTriangle size={26} color={C.copper} style={{ marginBottom: 14 }} />
+          <div style={{ fontSize: 16, fontWeight: 700, color: C.cream }}>Not configured yet</div>
+          <div style={{ fontSize: 13, color: C.sage, marginTop: 8, lineHeight: 1.6 }}>{configError}</div>
+          <div style={{ fontSize: 12.5, color: C.sageDim, marginTop: 14, lineHeight: 1.65, textAlign: "left", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 11, padding: 14 }}>
+            These are <strong style={{ color: C.cream }}>build</strong> variables, not Worker secrets.
+            In Cloudflare open the Worker → Settings → Build → Variables and secrets,
+            add <code style={{ color: C.brass }}>VITE_SUPABASE_URL</code> and{" "}
+            <code style={{ color: C.brass }}>VITE_SUPABASE_ANON_KEY</code>, then run the build again.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (booting) return <Splash text="Starting up…" />;
 
