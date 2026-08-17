@@ -641,7 +641,7 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
               <div style={{ position: "relative" }}>
                 <Search size={14} color={C.sageDim} style={{ position: "absolute", left: 11, top: 11 }} />
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a drink"
-                  style={{ width: "100%`, background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9, padding: `9px 12px 9px 32px", color: C.cream, fontFamily: SANS, fontSize: 13, outline: "none" }} />
+                  style={{ width: "100%", background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9, padding: "9px 12px 9px 32px", color: C.cream, fontFamily: SANS, fontSize: 13, outline: "none" }} />
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, overflowX: "auto", padding: "0 16px 10px" }}>
@@ -944,25 +944,51 @@ function Designer({ venue, zones, zoneId, setZoneId, orders, now, flash, actions
 
 function PriceList({ articles, currency, actions }) {
   const [q, setQ] = useState("");
+  const [hover, setHover] = useState(null);
   const [cat, setCat] = useState("All");
   const [editing, setEditing] = useState(null);
   const cats = useMemo(() => ["All", ...Array.from(new Set(articles.map((a) => a.category)))], [articles]);
   const shown = articles.filter((a) => (cat === "All" || a.category === cat) && (!q || a.name.toLowerCase().includes(q.toLowerCase())));
   const avgMargin = articles.length ? articles.reduce((s, a) => s + (a.price ? (a.price - a.cost) / a.price : 0), 0) / articles.length : 0;
 
+  const priced = articles.filter((a) => a.cost > 0);
+  const realMargin = priced.length
+    ? priced.reduce((acc, a) => acc + (a.price ? (a.price - a.cost) / a.price : 0), 0) / priced.length
+    : null;
+
   return (
-    <div>
+    <div style={{ maxWidth: 940 }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 18 }}>
         <Stat label="Articles" value={articles.length} />
-        <Stat label="Average margin" value={`${(avgMargin * 100).toFixed(0)}%`} accent={C.brass} />
+        {/* 100% margin means the buy prices are missing, not that drinks are free. */}
+        <Stat
+          label="Average margin"
+          value={realMargin === null ? "—" : `${(realMargin * 100).toFixed(0)}%`}
+          accent={realMargin === null ? C.sageDim : C.brass}
+          sub={priced.length < articles.length
+            ? `${articles.length - priced.length} have no buy price`
+            : "across all articles"}
+        />
         <Stat label="Categories" value={cats.length - 1} />
       </div>
+
+      {priced.length < articles.length && (
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "11px 14px",
+          background: "rgba(212,103,74,0.1)", border: "1px solid rgba(212,103,74,0.3)",
+          borderRadius: 11, marginBottom: 14 }}>
+          <AlertTriangle size={15} color={C.copper} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontFamily: SANS, fontSize: 12.5, color: C.cream, lineHeight: 1.5 }}>
+            {articles.length - priced.length} of {articles.length} articles have no buy price, so every
+            profit figure in Money is overstated. Tap an item to add what it costs you.
+          </span>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <div style={{ position: "relative", flex: "1 1 200px" }}>
           <Search size={14} color={C.sageDim} style={{ position: "absolute", left: 11, top: 11 }} />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find an article"
-            style={{ width: "100%`, background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9, padding: `9px 12px 9px 32px", color: C.cream, fontFamily: SANS, fontSize: 13, outline: "none" }} />
+            style={{ width: "100%", background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9, padding: "9px 12px 9px 32px", color: C.cream, fontFamily: SANS, fontSize: 13, outline: "none" }} />
         </div>
         <Btn variant="solid" icon={Plus} onClick={() => setEditing({ id: null, name: "", category: cat === "All" ? "Beer" : cat, cost: 0, price: 0, vatRate: 18, active: true })}>New article</Btn>
       </div>
@@ -990,16 +1016,29 @@ function PriceList({ articles, currency, actions }) {
           {shown.map((a) => {
             const m = a.price ? (a.price - a.cost) / a.price : 0;
             return (
-              <div key={a.id} style={{ display: "grid", gridTemplateColumns: "1fr 78px 78px 58px 68px 40px", gap: 8, padding: "11px 14px`, borderBottom: `1px solid ${C.lineFade}`, alignItems: `center" }}>
+              <div key={a.id}
+                onClick={() => setEditing({ ...a })}
+                onMouseEnter={() => setHover(a.id)}
+                onMouseLeave={() => setHover(null)}
+                style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 84px 84px 62px 74px 30px", gap: 14,
+                  padding: "12px 18px", borderBottom: `1px solid ${C.lineFade}`,
+                  alignItems: "center", cursor: "pointer",
+                  background: hover === a.id ? C.raise : "transparent" }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontFamily: SANS, fontSize: 13.5, color: C.cream, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</div>
-                  <div style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim }}>{a.category}</div>
+                  <div style={{ fontFamily: SANS, fontSize: 14, color: C.cream, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</div>
+                  <div style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim, marginTop: 2 }}>{a.category}</div>
                 </div>
-                <div style={{ fontFamily: MONO, fontSize: 13, color: C.sage, textAlign: "right" }}>{amount(a.cost, currency)}</div>
+                <div style={{ fontFamily: MONO, fontSize: 13, textAlign: "right",
+                  color: a.cost > 0 ? C.sage : C.copper }}>
+                  {a.cost > 0 ? amount(a.cost, currency) : "—"}
+                </div>
                 <div style={{ fontFamily: MONO, fontSize: 13, color: C.cream, textAlign: "right" }}>{amount(a.price, currency)}</div>
                 <div style={{ textAlign: "right", fontFamily: MONO, fontSize: 12, color: C.sage }}>{(a.vatRate ?? 18)}%</div>
-                <div style={{ textAlign: "right", fontFamily: MONO, fontSize: 12, color: m > 0.65 ? C.mint : m > 0.4 ? C.brass : C.copper }}>{(m * 100).toFixed(0)}%</div>
-                <button onClick={() => setEditing({ ...a })} style={{ background: "transparent", border: "none", color: C.sageDim, cursor: "pointer", justifySelf: "end" }}><ChevronRight size={16} /></button>
+                <div style={{ textAlign: "right", fontFamily: MONO, fontSize: 12,
+                  color: a.cost > 0 ? (m > 0.65 ? C.mint : m > 0.4 ? C.brass : C.copper) : C.sageDim }}>
+                  {a.cost > 0 ? `${(m * 100).toFixed(0)}%` : "—"}
+                </div>
+                <ChevronRight size={16} color={hover === a.id ? C.brass : C.sageDim} style={{ justifySelf: "end" }} />
               </div>
             );
           })}
@@ -1274,7 +1313,7 @@ function Reports({ venue, report, loading, mode, setMode, anchor, setAnchor, unp
             <Eyebrow style={{ color: C.brass }}>On the tab</Eyebrow>
           </div>
           {unpaid.map((b) => (
-            <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 16px`, borderBottom: `1px solid ${C.lineFade}`, flexWrap: `wrap" }}>
+            <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 16px", borderBottom: `1px solid ${C.lineFade}`, flexWrap: "wrap" }}>
               <span style={{ fontFamily: MONO, fontWeight: 700, color: C.brass, width: 40 }}>{b.tableLabel}</span>
               <span style={{ fontFamily: SANS, fontSize: 12.5, color: C.sage, flex: 1, minWidth: 120 }}>
                 {b.staffName} · {shortDate(b.closedAt)}
@@ -1320,7 +1359,7 @@ function Reports({ venue, report, loading, mode, setMode, anchor, setAnchor, unp
         </div>
         <div style={{ maxHeight: 380, overflowY: "auto" }}>
           {(report?.topItems || []).map((a, i) => (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 48px 82px 82px", gap: 8, padding: "10px 16px`, borderBottom: `1px solid ${C.lineFade}`, alignItems: `center" }}>
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 48px 82px 82px", gap: 8, padding: "10px 16px", borderBottom: `1px solid ${C.lineFade}`, alignItems: "center" }}>
               <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 <span style={{ fontFamily: SANS, fontSize: 13, color: C.cream }}>{a.name}</span>
                 <span style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim, marginLeft: 8 }}>{a.category}</span>
@@ -1667,7 +1706,7 @@ function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loadi
           const st = states[i], meta = STATE_META[st];
           const todayTotal = todayByBar[v.id] || 0;
           return (
-            <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px`, borderBottom: `1px solid ${C.lineFade}`, flexWrap: `wrap" }}>
+            <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderBottom: `1px solid ${C.lineFade}`, flexWrap: "wrap" }}>
               <div style={{ minWidth: 160, flex: "1 1 160px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span style={{ fontFamily: SANS, fontWeight: 700, fontSize: 15, color: C.cream }}>{v.name}</span>
@@ -2414,11 +2453,12 @@ export default function App() {
       <header style={{ position: "sticky", top: 0, zIndex: 60, background: "rgba(10,20,17,0.92)", backdropFilter: "blur(10px)", borderBottom: `1px solid ${C.line}` }}>
         <div style={{ maxWidth: 1320, margin: "0 auto", padding: "11px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginRight: "auto" }}>
-            <div style={{ width: 30, height: 30, borderRadius: 8, border: `1.5px solid ${C.brass}`, display: "grid", placeItems: "center", boxShadow: `0 0 18px -4px ${C.a50}` }}>
-              <Wine size={15} color={C.brass} />
-            </div>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 14, letterSpacing: "0.18em", color: C.cream }}>BACKBAR</div>
+            <Mark logoUrl={venue?.logoUrl} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 14, letterSpacing: "0.14em", color: C.cream,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 220 }}>
+                {isPlatform ? "BACKBAR" : (venue?.name || "").toUpperCase()}
+              </div>
               <div style={{ fontSize: 10.5, color: C.sageDim, letterSpacing: "0.1em" }}>
                 {isPlatform ? "PLATFORM DASHBOARD" : "POWERED BY BACKBAR"}
               </div>
@@ -2426,7 +2466,7 @@ export default function App() {
           </div>
 
           {!isPlatform && openHere.length > 0 && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px`, borderRadius: 99, border: `1px solid ${C.brassDim}`, background: `${C.a07}" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 99, border: `1px solid ${C.brassDim}`, background: C.a07 }}>
               <Clock size={13} color={C.brass} />
               <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.brass }}>
                 {isWaiter ? `${myOpen.length} of ${openHere.length} tables yours` : `${openHere.length} open · ${money(openValue, venue.currency)}`}
