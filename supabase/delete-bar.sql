@@ -114,3 +114,27 @@ begin
   from _sold s
   order by s.gross desc;
 end $$;
+
+-- ---------------------------------------------------------------------------
+-- Where the bar's fiscal printer bridge lives, and its shared token.
+-- The bridge is on the bar's own LAN, so the address is per bar.
+-- ---------------------------------------------------------------------------
+
+alter table bars
+  add column if not exists fiscal_bridge_url   text,
+  add column if not exists fiscal_bridge_token text;
+
+create or replace function set_fiscal_config(
+  p_bar uuid, p_enabled boolean, p_url text, p_token text,
+  p_legal_name text default null, p_tax_id text default null
+) returns void language plpgsql security definer set search_path = public as $$
+begin
+  if not (is_owner_of(p_bar) or is_platform()) then raise exception 'owners_only'; end if;
+  update bars
+     set fiscal_enabled = coalesce(p_enabled, fiscal_enabled),
+         fiscal_bridge_url = p_url,
+         fiscal_bridge_token = p_token,
+         legal_name = coalesce(p_legal_name, legal_name),
+         tax_id = coalesce(p_tax_id, tax_id)
+   where id = p_bar;
+end $$;

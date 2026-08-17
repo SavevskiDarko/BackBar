@@ -1,0 +1,15 @@
+{
+  "name": "backbar-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Local bridge between Backbar and a serial fiscal printer",
+  "scripts": {
+    "start": "node index.js",
+    "simulate": "SIMULATE=1 node index.js",
+    "ports": "node -e \"import('serialport').then(m=>m.SerialPort.list()).then(l=>l.length?console.table(l.map(p=>({path:p.path,maker:p.manufacturer||'',id:p.productId||''}))):console.log('No serial ports found'))\""
+  },
+  "dependencies": {
+    "serialport": "^12.0.0"
+  }
+}

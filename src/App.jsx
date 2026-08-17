@@ -3,7 +3,7 @@ import {
   LayoutGrid, Store, BarChart3, Plus, Minus, Trash2, X, Check, Circle, Square,
   RectangleHorizontal, Users, Clock, CreditCard, Banknote, Search, ChevronRight,
   Copy, Save, Receipt, RotateCw, Loader2, Wine, ListOrdered, LogOut, Delete,
-  ChevronLeft, Palette, ImageIcon,
+  ChevronLeft, Palette, ImageIcon, Printer,
   ShieldCheck, UserPlus, AlertTriangle, ArrowLeft, KeyRound, Pause, Play, Wallet,
 } from "lucide-react";
 
@@ -19,6 +19,7 @@ import {
 } from "./lib/auth";
 import { useBarData } from "./lib/useBarData";
 import * as api from "./lib/api";
+import * as fiscal from "./lib/fiscal";
 import { WifiOff, RefreshCw, Download } from "lucide-react";
 
 /* ============================================================================
@@ -1207,7 +1208,7 @@ function SplitList({ rows, cur, nameKey = "name", valueKey = "gross", sub }) {
   );
 }
 
-function Reports({ venue, report, products, productsLoading, loading, mode, setMode, anchor, setAnchor, unpaid, onSettleUnpaid, onExport, exporting }) {
+function Reports({ venue, report, products, productsLoading, loading, mode, setMode, anchor, setAnchor, unpaid, onSettleUnpaid, onExport, exporting, actions, onTestPrinter, onRetryFiscal }) {
   const cur = venue.currency;
   const t = report?.totals || {};
   const prev = report?.previous || {};
@@ -1351,6 +1352,9 @@ function Reports({ venue, report, products, productsLoading, loading, mode, setM
 
       <ProductsSold rows={products} loading={productsLoading} cur={cur} />
 
+      <FiscalPanel venue={venue} actions={actions} onTest={onTestPrinter}
+        onRetryAll={onRetryFiscal} stuck={att.noFiscal || 0} />
+
       <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim, marginTop: 14, lineHeight: 1.5 }}>
         A day runs from {String(report?.cutoffHour ?? 5).padStart(2, "0")}:00 to
         {" "}{String(report?.cutoffHour ?? 5).padStart(2, "0")}:00, so late trade counts
@@ -1462,6 +1466,96 @@ function ProductsSold({ rows, loading, cur }) {
           <span style={{ fontFamily: MONO, fontSize: 13, color: C.cream, textAlign: "right" }}>{money(totals.gross, cur)}</span>
           <span style={{ fontFamily: MONO, fontSize: 13, color: C.brass, textAlign: "right" }}>{money(totals.profit, cur)}</span>
           <span />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FiscalPanel({ venue, actions, onTest, onRetryAll, stuck }) {
+  const [open, setOpen] = useState(false);
+  const [cfg, setCfg] = useState({
+    enabled: venue.fiscalEnabled || false,
+    url: venue.fiscalBridgeUrl || "",
+    token: venue.fiscalBridgeToken || "",
+    legalName: venue.legalName || "",
+    taxId: venue.taxId || "",
+  });
+  const [status, setStatus] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, marginTop: 16 }}>
+      <button onClick={() => setOpen(!open)} style={{
+        width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "14px 18px",
+        background: "transparent", border: "none", cursor: "pointer", textAlign: "left",
+      }}>
+        <Printer size={15} color={venue.fiscalEnabled ? C.brass : C.sageDim} />
+        <span style={{ fontFamily: SANS, fontSize: 13.5, fontWeight: 600, color: C.cream }}>
+          Fiscal printer
+        </span>
+        <span style={{ fontFamily: SANS, fontSize: 12, color: venue.fiscalEnabled ? C.mint : C.sageDim }}>
+          {venue.fiscalEnabled ? (venue.fiscalBridgeUrl ? "connected" : "on, no address set") : "off"}
+        </span>
+        {stuck > 0 && (
+          <span style={{ fontFamily: MONO, fontSize: 11, color: C.copper, border: `1px solid ${C.copper}55`,
+            borderRadius: 99, padding: "2px 8px" }}>{stuck} not printed</span>
+        )}
+        <ChevronRight size={16} color={C.sageDim}
+          style={{ marginLeft: "auto", transform: open ? "rotate(90deg)" : "none", transition: "transform 150ms" }} />
+      </button>
+
+      {open && (
+        <div style={{ padding: "0 18px 18px", display: "grid", gap: 12 }}>
+          <div style={{ fontFamily: SANS, fontSize: 12, color: C.sageDim, lineHeight: 1.5 }}>
+            The printer sits on this bar's own wifi, so receipts still print when the
+            internet is down. See docs/fiscal-bridge.md.
+          </div>
+
+          <Field label="Bridge address" value={cfg.url} mono
+            onChange={(v) => setCfg({ ...cfg, url: v })} placeholder="http://192.168.1.50:8377" />
+          <Field label="Shared token (optional)" value={cfg.token} mono
+            onChange={(v) => setCfg({ ...cfg, token: v })} placeholder="leave blank if unset" />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <Field label="Registered name" value={cfg.legalName}
+              onChange={(v) => setCfg({ ...cfg, legalName: v })} placeholder="Fjaka DOOEL" />
+            <Field label="Tax number (ЕДБ)" value={cfg.taxId} mono
+              onChange={(v) => setCfg({ ...cfg, taxId: v })} />
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontFamily: SANS, fontSize: 13, color: C.cream, flex: 1 }}>
+              Print a receipt when a bill is paid
+            </span>
+            <button onClick={() => setCfg({ ...cfg, enabled: !cfg.enabled })} style={{
+              width: 50, height: 28, borderRadius: 99, cursor: "pointer", padding: 0, position: "relative",
+              border: `1px solid ${cfg.enabled ? C.brass : C.line2}`,
+              background: cfg.enabled ? C.a20 : C.raise,
+            }}>
+              <span style={{ position: "absolute", top: 3, left: cfg.enabled ? 25 : 3, width: 20, height: 20,
+                borderRadius: 99, background: cfg.enabled ? C.brass : C.sageDim, transition: "left 150ms" }} />
+            </button>
+          </div>
+
+          {status && (
+            <div style={{ fontFamily: MONO, fontSize: 12, padding: "10px 12px", borderRadius: 9,
+              background: C.ink, border: `1px solid ${status.ok ? C.line2 : C.copper}`,
+              color: status.ok ? C.mint : C.copper }}>
+              {status.ok
+                ? `${status.device} · paper ${status.paper} · ${status.printedToday ?? 0} printed`
+                : status.message || status.error}
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Btn icon={busy ? Loader2 : Printer} disabled={busy || !cfg.url}
+              onClick={async () => { setBusy(true); setStatus(await onTest(cfg)); setBusy(false); }}>
+              Test connection
+            </Btn>
+            {stuck > 0 && <Btn variant="ghost" icon={RotateCw} onClick={onRetryAll}>Print the {stuck} missed</Btn>}
+            <Btn variant="solid" icon={Check} style={{ marginLeft: "auto" }}
+              onClick={() => actions.saveFiscal(cfg)}>Save</Btn>
+          </div>
         </div>
       )}
     </div>
@@ -2341,6 +2435,7 @@ export default function App() {
     removeStaff: (id) => guard((c) => api.deactivateStaff(c, id)),
     setDiscountPolicy: (v) => guard((c) => api.setDiscountPolicy(c, venue.id, v)),
     saveBranding: (b) => guard((c) => api.setBranding(c, venue.id, b)),
+    saveFiscal: (cfg) => guard((c) => api.setFiscalConfig(c, venue.id, cfg), "Printer settings saved"),
     uploadLogo: async (file) => {
       const ok = await guard((c) => api.uploadLogo(c, venue.id, file));
       if (ok) setLogoStamp(Date.now());
@@ -2395,9 +2490,59 @@ export default function App() {
       flash(paid
         ? `Table ${table.label} paid — ${money(total, venue.currency)}${tail}`
         : `Table ${table.label} closed unpaid${tail}`);
+
+      // A cash sale needs its fiscal receipt now, not later. Fire it once the
+      // bill exists server-side; a queued bill gets its receipt when it syncs.
+      if (paid && res !== "queued" && venue.fiscalEnabled && venue.fiscalBridgeUrl) {
+        printFiscal(billId);
+      }
     } catch (e) { flash(e.message); }
     finally { setSheetBusy(false); }
   };
+
+  /* ---- the fiscal printer ---- */
+
+  /* The bill id is generated on the client when the bill closes, so it is
+     already the idempotency key the printer needs — no lookup required. */
+  const printFiscal = useCallback(async (billId) => {
+    if (!client || !venue?.fiscalBridgeUrl || !billId) return;
+    try {
+      const payload = await api.fiscalPayload(client, billId);
+      const r = await fiscal.printReceipt(venue.fiscalBridgeUrl, payload, venue.fiscalBridgeToken);
+      await api.markFiscalised(client, billId, r.receiptNo, r.device, r);
+      flash(r.duplicate ? `Receipt ${r.receiptNo} (already printed)` : `Receipt ${r.receiptNo} printed`);
+      return true;
+    } catch (e) {
+      flash(`Printer: ${e.message}`);
+      // Recorded so the owner sees an unfiscalised bill rather than nothing.
+      try { await api.markFiscalFailed(client, billId, e.message); } catch { /* already flashed */ }
+      return false;
+    }
+  }, [client, venue, flash]);
+
+  const testPrinter = useCallback(async (cfg) => {
+    try {
+      const st = await fiscal.printerStatus(cfg.url, cfg.token);
+      return st;
+    } catch (e) {
+      return { ok: false, message: e.message };
+    }
+  }, []);
+
+  /* Anything paid but unprinted — a jam, or the bar was offline. */
+  const retryFiscal = useCallback(async () => {
+    if (!client || !venue) return;
+    try {
+      const stuck = await api.loadFiscalProblems(client, venue.id);
+      let done = 0;
+      for (const b of stuck) {
+        // Sequential on purpose: one printer, one queue.
+        if (await printFiscal(b.id)) done++; else break;
+      }
+      flash(done ? `${done} receipt${done > 1 ? "s" : ""} printed` : "Printer still unreachable");
+      loadReports();
+    } catch (e) { flash(e.message); }
+  }, [client, venue, printFiscal, flash]);
 
   /* ---- owner reports ---- */
   const [mode, setMode] = useState("day");
@@ -2773,6 +2918,7 @@ export default function App() {
             mode={mode} setMode={setMode} anchor={anchor} setAnchor={setAnchor}
             unpaid={unpaid} onSettleUnpaid={settleUnpaid}
             onExport={exportCsv} exporting={exporting}
+            actions={barActions} onTestPrinter={testPrinter} onRetryFiscal={retryFiscal}
           />
         )}
         {isOwner && currentTab === "team" && (

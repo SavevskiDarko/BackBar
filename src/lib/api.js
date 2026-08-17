@@ -224,6 +224,29 @@ export function logoUrl(client, path, stamp) {
   return data?.publicUrl ? `${data.publicUrl}?v=${stamp || 1}` : null;
 }
 
+export async function setFiscalConfig(client, barId, cfg) {
+  unwrap(await client.rpc("set_fiscal_config", {
+    p_bar: barId, p_enabled: cfg.enabled, p_url: cfg.url || null,
+    p_token: cfg.token || null, p_legal_name: cfg.legalName || null,
+    p_tax_id: cfg.taxId || null,
+  }));
+}
+
+/** Everything the printer needs for one receipt, assembled server-side. */
+export async function fiscalPayload(client, billId) {
+  return unwrap(await client.rpc("fiscal_payload", { p_bill: billId }));
+}
+
+export async function markFiscalised(client, billId, receiptNo, device, detail) {
+  unwrap(await client.rpc("mark_bill_fiscalised", {
+    p_bill: billId, p_receipt_no: receiptNo, p_device: device, p_detail: detail || null,
+  }));
+}
+
+export async function markFiscalFailed(client, billId, error) {
+  unwrap(await client.rpc("mark_bill_fiscal_failed", { p_bill: billId, p_error: String(error).slice(0, 500) }));
+}
+
 export async function setDayCutoff(client, barId, hour) {
   unwrap(await client.from("bars").update({ day_cutoff_hour: hour }).eq("id", barId));
 }
@@ -371,6 +394,11 @@ function mapBar(b) {
       || "Owner",
     staff: (b.staff || []).filter((s) => s.role === "waiter" && s.active),
     allowStaffDiscount: b.allow_staff_discount,
+    fiscalEnabled: b.fiscal_enabled,
+    fiscalBridgeUrl: b.fiscal_bridge_url,
+    fiscalBridgeToken: b.fiscal_bridge_token,
+    legalName: b.legal_name,
+    taxId: b.tax_id,
     brandAccent: b.brand_accent,
     brandSurface: b.brand_surface,
     logoPath: b.logo_path,
