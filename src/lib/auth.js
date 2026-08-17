@@ -70,8 +70,11 @@ async function callLogin(payload) {
 
 /** Step 1 — tie this device to one bar. Runs once per tablet. */
 export async function pairDevice(barCode) {
-  const { barId, barName } = await callLogin({ action: "pair", barCode });
-  const bar = { id: barId, name: barName, code: barCode };
+  const r = await callLogin({ action: "pair", barCode });
+  const bar = {
+    id: r.barId, name: r.barName, code: barCode,
+    accent: r.accent || null, surface: r.surface || null, logoPath: r.logoPath || null,
+  };
   savePairing(bar);
   return bar;
 }

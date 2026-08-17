@@ -3,10 +3,15 @@ import {
   LayoutGrid, Store, BarChart3, Plus, Minus, Trash2, X, Check, Circle, Square,
   RectangleHorizontal, Users, Clock, CreditCard, Banknote, Search, ChevronRight,
   Copy, Save, Receipt, RotateCw, Loader2, Wine, ListOrdered, LogOut, Delete,
+  ChevronLeft, Palette, ImageIcon,
   ShieldCheck, UserPlus, AlertTriangle, ArrowLeft, KeyRound, Pause, Play, Wallet,
 } from "lucide-react";
 
 import { configError } from "./lib/supabase";
+import {
+  SURFACES, ACCENT_SUGGESTIONS, DEFAULT_BRAND, applyTheme, buildTheme,
+  parseHex, contrast, rememberBrand, recallBrand,
+} from "./lib/theme";
 import {
   loadPairing, clearPairing, loadStaffSession, clearStaffSession,
   pairDevice, signInStaff, signInPlatform, restorePlatformSession, signOut,
@@ -24,11 +29,34 @@ import { WifiOff, RefreshCw, Download } from "lucide-react";
    database does, and this file only decides what to render.
    ========================================================================== */
 
+/* Colours are CSS custom properties so a bar's branding can be swapped at
+   runtime without re-rendering anything. src/lib/theme.js sets them.
+   copper and mint stay literal: a warning must look like a warning regardless
+   of what colour the owner picked. */
 const C = {
-  ink: "#0A1411", panel: "#101D18", raise: "#16261F", line: "#23392F", line2: "#2F4C40",
-  brass: "#E6B450", brassDim: "#8A6C2E", cream: "#F4EDDF", creamDim: "#CFC4AC",
-  sage: "#8CA69B", sageDim: "#5C736A", copper: "#D4674A", mint: "#67C9A0",
+  ink: "var(--ink)",
+  panel: "var(--panel)",
+  raise: "var(--raise)",
+  line: "var(--line)",
+  line2: "var(--line2)",
+  lineFade: "var(--line-fade)",
+  brass: "var(--accent)",
+  brassDim: "var(--accent-dim)",
+  onBrass: "var(--on-accent)",
+  cream: "var(--cream)",
+  creamDim: "var(--cream-dim)",
+  sage: "var(--sage)",
+  sageDim: "var(--sage-dim)",
+  copper: "#D4674A",
+  mint: "#67C9A0",
+  // pre-mixed accent tints, since var() can't take an alpha suffix
+  a05: "var(--accent-05)", a07: "var(--accent-07)", a08: "var(--accent-08)",
+  a10: "var(--accent-1)",  a12: "var(--accent-12)", a16: "var(--accent-16)",
+  a20: "var(--accent-2)",  a35: "var(--accent-35)", a45: "var(--accent-45)",
+  a50: "var(--accent-5)",  a55: "var(--accent-55)",
+  glow: "var(--glow)", glowSoft: "var(--glow-soft)",
 };
+
 const MONO = "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace";
 const SANS = "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 
@@ -140,7 +168,7 @@ function Btn({ children, onClick, variant = "ghost", size = "md", icon: Icon, di
   const fs = size === "sm" ? 12 : size === "lg" ? 14 : 13;
   const styles = {
     ghost: { background: "transparent", color: C.sage, borderColor: C.line },
-    solid: { background: C.brass, color: "#1A1305", borderColor: C.brass },
+    solid: { background: C.brass, color: C.onBrass, borderColor: C.brass },
     quiet: { background: C.raise, color: C.cream, borderColor: C.line },
     danger: { background: "transparent", color: C.copper, borderColor: "rgba(212,103,74,0.35)" },
     bare: { background: "transparent", color: C.sage, borderColor: "transparent" },
@@ -342,7 +370,7 @@ function AuthScreen({ platformName, pairedVenue, onPair, onUnpair, onPin, onPlat
     <div style={{ minHeight: "100vh", background: C.ink, display: "grid", placeItems: "center", padding: 20, fontFamily: SANS }}>
       <div style={{ width: "100%", maxWidth: 330 }}>
         <div style={{ textAlign: "center", marginBottom: 22 }}>
-          <div style={{ width: 46, height: 46, borderRadius: 12, border: `1.5px solid ${C.brass}`, display: "grid", placeItems: "center", margin: "0 auto 14px", boxShadow: "0 0 30px -6px rgba(230,180,80,0.55)" }}>
+          <div style={{ width: 46, height: 46, borderRadius: 12, border: `1.5px solid ${C.brass}`, display: "grid", placeItems: "center", margin: "0 auto 14px", boxShadow: `0 0 30px -6px ${C.a55}` }}>
             {mode === "platform" ? <ShieldCheck size={21} color={C.brass} /> : <Wine size={22} color={C.brass} />}
           </div>
           <div style={{ fontWeight: 800, fontSize: 10, letterSpacing: "0.28em", color: C.sageDim, marginBottom: 8 }}>
@@ -407,9 +435,9 @@ function TableNode({ table, scale, order, selected, onPointerDown, onClick, mode
   const stale = occupied && (now - order.openedAt) / 60000 > 75;
   const isBar = table.shape === "bar";
   const radius = table.shape === "round" ? "50%" : isBar ? 8 : 12;
-  const ring = selected ? C.brass : occupied ? (stale ? C.copper : "rgba(230,180,80,0.55)") : C.line2;
+  const ring = selected ? C.brass : occupied ? (stale ? C.copper : `${C.a55}`) : C.line2;
   const bg = isBar ? "linear-gradient(180deg,#1D3129,#152520)"
-    : occupied ? "linear-gradient(180deg,rgba(230,180,80,0.16),rgba(230,180,80,0.05))"
+    : occupied ? `linear-gradient(180deg,${C.a16},${C.a05})`
     : "linear-gradient(180deg,#152521,#101C18)";
   const fs = clamp(13 * scale, 9, 18);
 
@@ -426,13 +454,13 @@ function TableNode({ table, scale, order, selected, onPointerDown, onClick, mode
     >
       {occupied && (
         <div style={{ position: "absolute", inset: "-70%", borderRadius: "50%", pointerEvents: "none",
-          background: `radial-gradient(circle, ${stale ? "rgba(212,103,74,0.20)" : "rgba(230,180,80,0.20)"} 0%, rgba(0,0,0,0) 68%)` }} />
+          background: `radial-gradient(circle, ${stale ? "rgba(212,103,74,0.20)" : `${C.a20}`} 0%, rgba(0,0,0,0) 68%)` }} />
       )}
       <SeatPips table={table} scale={scale} />
       <div style={{
         position: "absolute", inset: 0, borderRadius: radius, background: bg,
         border: `${selected ? 2 : 1.5}px solid ${ring}`,
-        boxShadow: occupied ? `0 6px 26px -6px ${stale ? "rgba(212,103,74,0.5)" : "rgba(230,180,80,0.45)"}` : "0 2px 10px rgba(0,0,0,0.4)",
+        boxShadow: occupied ? `0 6px 26px -6px ${stale ? "rgba(212,103,74,0.5)" : `${C.a45}`}` : "0 2px 10px rgba(0,0,0,0.4)",
         display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, overflow: "hidden",
       }}>
         <div style={{ fontFamily: isBar ? SANS : MONO, fontWeight: 700, fontSize: isBar ? fs * 0.85 : fs, letterSpacing: isBar ? "0.24em" : "0.02em", color: occupied ? C.brass : isBar ? C.sage : C.creamDim }}>
@@ -495,13 +523,13 @@ function FloorPlan({ zone, orders, venueId, mode, selectedId, onSelect, onMove, 
       onClick={(e) => e.target === e.currentTarget && mode === "design" && onSelect(null)}
       style={{
         position: "relative", width: "100%", aspectRatio: `${PLAN_W} / ${PLAN_H}`,
-        background: `radial-gradient(120% 90% at 50% 0%, rgba(230,180,80,0.05), rgba(0,0,0,0) 55%), linear-gradient(180deg, #0C1815, #08110E)`,
+        background: `radial-gradient(120% 90% at 50% 0%, ${C.a05}, rgba(0,0,0,0) 55%), linear-gradient(180deg, #0C1815, #08110E)`,
         borderRadius: 16, border: `1px solid ${C.line}`, overflow: "hidden", userSelect: "none",
       }}
     >
       <div style={{
         position: "absolute", inset: 0, pointerEvents: "none",
-        backgroundImage: `linear-gradient(${C.line}55 1px, transparent 1px), linear-gradient(90deg, ${C.line}55 1px, transparent 1px)`,
+        backgroundImage: `linear-gradient(${C.lineFade} 1px, transparent 1px), linear-gradient(90deg, ${C.lineFade} 1px, transparent 1px)`,
         backgroundSize: `${(50 / PLAN_W) * 100}% ${(50 / PLAN_H) * 100}%`,
         opacity: mode === "design" ? 0.75 : 0.28,
       }} />
@@ -590,14 +618,14 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
               <div style={{ position: "relative" }}>
                 <Search size={14} color={C.sageDim} style={{ position: "absolute", left: 11, top: 11 }} />
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a drink"
-                  style={{ width: "100%", background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9, padding: "9px 12px 9px 32px", color: C.cream, fontFamily: SANS, fontSize: 13, outline: "none" }} />
+                  style={{ width: "100%`, background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9, padding: `9px 12px 9px 32px", color: C.cream, fontFamily: SANS, fontSize: 13, outline: "none" }} />
               </div>
             </div>
             <div style={{ display: "flex", gap: 6, overflowX: "auto", padding: "0 16px 10px" }}>
               {cats.map((c) => (
                 <button key={c} onClick={() => setCat(c)} style={{
                   padding: "6px 11px", borderRadius: 99, border: `1px solid ${cat === c ? C.brass : C.line}`,
-                  background: cat === c ? "rgba(230,180,80,0.12)" : "transparent", color: cat === c ? C.brass : C.sage,
+                  background: cat === c ? `${C.a12}` : "transparent", color: cat === c ? C.brass : C.sage,
                   fontFamily: SANS, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer",
                 }}>{c}</button>
               ))}
@@ -797,7 +825,7 @@ function Designer({ venue, zones, zoneId, setZoneId, orders, now, flash, actions
           {zones.map((z) => (
             <button key={z.id} onClick={() => { setZoneId(z.id); setSel(null); }} style={{
               padding: "7px 13px", borderRadius: 9, border: `1px solid ${z.id === zone.id ? C.brass : C.line}`,
-              background: z.id === zone.id ? "rgba(230,180,80,0.1)" : "transparent",
+              background: z.id === zone.id ? `${C.a10}` : "transparent",
               color: z.id === zone.id ? C.brass : C.sage, fontFamily: SANS, fontWeight: 600, fontSize: 13, cursor: "pointer",
             }}>
               {z.name}<span style={{ fontFamily: MONO, fontSize: 11, opacity: 0.6, marginLeft: 7 }}>{z.tables.length}</span>
@@ -911,7 +939,7 @@ function PriceList({ articles, currency, actions }) {
         <div style={{ position: "relative", flex: "1 1 200px" }}>
           <Search size={14} color={C.sageDim} style={{ position: "absolute", left: 11, top: 11 }} />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find an article"
-            style={{ width: "100%", background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9, padding: "9px 12px 9px 32px", color: C.cream, fontFamily: SANS, fontSize: 13, outline: "none" }} />
+            style={{ width: "100%`, background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9, padding: `9px 12px 9px 32px", color: C.cream, fontFamily: SANS, fontSize: 13, outline: "none" }} />
         </div>
         <Btn variant="solid" icon={Plus} onClick={() => setEditing({ id: null, name: "", category: cat === "All" ? "Beer" : cat, cost: 0, price: 0, vatRate: 18, active: true })}>New article</Btn>
       </div>
@@ -920,7 +948,7 @@ function PriceList({ articles, currency, actions }) {
         {cats.map((c) => (
           <button key={c} onClick={() => setCat(c)} style={{
             padding: "6px 11px", borderRadius: 99, border: `1px solid ${cat === c ? C.brass : C.line}`,
-            background: cat === c ? "rgba(230,180,80,0.1)" : "transparent", color: cat === c ? C.brass : C.sage,
+            background: cat === c ? `${C.a10}` : "transparent", color: cat === c ? C.brass : C.sage,
             fontFamily: SANS, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap", cursor: "pointer",
           }}>{c}</button>
         ))}
@@ -939,7 +967,7 @@ function PriceList({ articles, currency, actions }) {
           {shown.map((a) => {
             const m = a.price ? (a.price - a.cost) / a.price : 0;
             return (
-              <div key={a.id} style={{ display: "grid", gridTemplateColumns: "1fr 78px 78px 58px 68px 40px", gap: 8, padding: "11px 14px", borderBottom: `1px solid ${C.line}55`, alignItems: "center" }}>
+              <div key={a.id} style={{ display: "grid", gridTemplateColumns: "1fr 78px 78px 58px 68px 40px", gap: 8, padding: "11px 14px`, borderBottom: `1px solid ${C.lineFade}`, alignItems: `center" }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontFamily: SANS, fontSize: 13.5, color: C.cream, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</div>
                   <div style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim }}>{a.category}</div>
@@ -996,133 +1024,237 @@ function PriceList({ articles, currency, actions }) {
 
 /* ------------------------------------------------------------ owner reports */
 
-function Reports({ bills: allBills, unpaid, orders, venue, range, setRange, loading, onSettleUnpaid }) {
+/* ---------------------------------------------------------------- reporting */
+
+const startOfWeek = (d) => {                    // Monday
+  const x = new Date(d);
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  return x;
+};
+const iso = (d) => {
+  const x = new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+};
+
+/** The range on screen, and how to step it. Everything is a business day —
+    see business_day() in reports.sql for why a bar's Friday runs past midnight. */
+function periodRange(mode, anchor) {
+  const a = new Date(anchor);
+  if (mode === "day") return { from: iso(a), to: iso(a) };
+  if (mode === "week") {
+    const s = startOfWeek(a);
+    const e = new Date(s); e.setDate(s.getDate() + 6);
+    return { from: iso(s), to: iso(e) };
+  }
+  const s = new Date(a.getFullYear(), a.getMonth(), 1);
+  const e = new Date(a.getFullYear(), a.getMonth() + 1, 0);
+  return { from: iso(s), to: iso(e) };
+}
+
+function periodLabel(mode, anchor) {
+  const a = new Date(anchor);
+  const today = new Date();
+  if (mode === "day") {
+    const same = iso(a) === iso(today);
+    const y = new Date(today); y.setDate(today.getDate() - 1);
+    if (same) return "Today";
+    if (iso(a) === iso(y)) return "Yesterday";
+    return a.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  }
+  if (mode === "week") {
+    const { from, to } = periodRange("week", a);
+    const f = new Date(from), t = new Date(to);
+    if (iso(startOfWeek(today)) === from) return "This week";
+    return `${f.getDate()} – ${t.getDate()} ${t.toLocaleDateString(undefined, { month: "short" })}`;
+  }
+  if (a.getMonth() === today.getMonth() && a.getFullYear() === today.getFullYear()) return "This month";
+  return a.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+}
+
+function stepAnchor(mode, anchor, dir) {
+  const a = new Date(anchor);
+  if (mode === "day") a.setDate(a.getDate() + dir);
+  else if (mode === "week") a.setDate(a.getDate() + 7 * dir);
+  else a.setMonth(a.getMonth() + dir);
+  return a;
+}
+
+function Delta({ now, before }) {
+  if (!before) return null;
+  const pct = ((now - before) / before) * 100;
+  if (!Number.isFinite(pct) || Math.abs(pct) < 0.5) return null;
+  const up = pct > 0;
+  return (
+    <span style={{ fontFamily: MONO, fontSize: 11, color: up ? C.mint : C.copper, marginLeft: 7 }}>
+      {up ? "▲" : "▼"} {Math.abs(pct).toFixed(0)}%
+    </span>
+  );
+}
+
+function Bars({ series, cur, height = 150 }) {
+  const peak = Math.max(...series.map((s) => Number(s.gross) || 0), 0.01);
+  if (!series.length) {
+    return <div style={{ fontFamily: SANS, fontSize: 13, color: C.sageDim, padding: "24px 0" }}>
+      Nothing sold in this period.
+    </div>;
+  }
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: series.length > 20 ? 2 : 5, height, marginTop: 16 }}>
+      {series.map((s, i) => {
+        const g = Number(s.gross) || 0;
+        return (
+          <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, minWidth: 0 }}>
+            <div title={`${s.label}: ${money(g, cur)}`} style={{
+              width: "100%", height: `${Math.max(2, (g / peak) * (height - 32))}px`,
+              borderRadius: "4px 4px 2px 2px",
+              background: g === peak ? `linear-gradient(180deg, ${C.brass}, ${C.brassDim})`
+                                     : "linear-gradient(180deg, #34564A, #22392F)",
+            }} />
+            <span style={{ fontFamily: MONO, fontSize: 9, color: C.sageDim, whiteSpace: "nowrap",
+              overflow: "hidden", textOverflow: "clip", maxWidth: "100%" }}>
+              {series.length > 16 ? s.label.split(" ")[0] : s.label}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function SplitList({ rows, cur, nameKey = "name", valueKey = "gross", sub }) {
+  const max = Math.max(...rows.map((r) => Number(r[valueKey]) || 0), 0.01);
+  if (!rows.length) return <div style={{ fontFamily: SANS, fontSize: 13, color: C.sageDim }}>Nothing yet.</div>;
+  return (
+    <div style={{ display: "grid", gap: 11, marginTop: 14 }}>
+      {rows.map((r, i) => (
+        <div key={i}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5, gap: 8 }}>
+            <span style={{ fontFamily: SANS, fontSize: 12.5, color: C.cream, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {r[nameKey]}
+            </span>
+            <span style={{ fontFamily: MONO, fontSize: 12, color: C.sage, whiteSpace: "nowrap" }}>
+              {money(Number(r[valueKey]) || 0, cur)}{sub ? ` · ${sub(r)}` : ""}
+            </span>
+          </div>
+          <div style={{ height: 5, background: C.raise, borderRadius: 99, overflow: "hidden" }}>
+            <div style={{ width: `${((Number(r[valueKey]) || 0) / max) * 100}%`, height: "100%", background: C.brass, borderRadius: 99 }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Reports({ venue, report, loading, mode, setMode, anchor, setAnchor, unpaid, onSettleUnpaid, onExport, exporting }) {
   const cur = venue.currency;
-  const bills = allBills;
-  const paidBills = bills.filter((b) => b.paid);
+  const t = report?.totals || {};
+  const prev = report?.previous || {};
+  const gross = Number(t.gross) || 0;
+  const cost = Number(t.cost) || 0;
+  const profit = Number(t.profit) || 0;
+  const margin = gross ? (profit / gross) * 100 : 0;
+  const att = report?.attention || {};
+  const vat = report?.vat || [];
+  const totalVat = vat.reduce((a, v) => a + Number(v.vat || 0), 0);
+  const atToday = iso(new Date(anchor)) >= iso(new Date());
 
-  const revenue = round2(paidBills.reduce((s, b) => s + b.total, 0));
-  const cost = round2(paidBills.reduce((s, b) => s + b.cost, 0));
-  const profit = round2(revenue - cost);
-  const margin = revenue ? (profit / revenue) * 100 : 0;
-  const avg = paidBills.length ? revenue / paidBills.length : 0;
-
-  const unpaidTotal = round2(unpaid.reduce((s, b) => s + b.total, 0));
-
-  const open = Object.values(orders).filter((o) => o.venueId === venue.id);
-  const openValue = round2(open.reduce((s, o) => s + o.lines.reduce((x, l) => x + l.price * l.qty, 0), 0));
-
-  const byHour = useMemo(() => {
-    const h = Array(24).fill(0);
-    paidBills.forEach((b) => (h[new Date(b.closedAt).getHours()] += b.total));
-    return h;
-  }, [paidBills]);
-  const peak = Math.max(...byHour, 0.01);
-  const act = byHour.map((v, i) => ({ v, i })).filter((x) => x.v > 0);
-  const firstH = act.length ? act[0].i : 8, lastH = act.length ? act[act.length - 1].i : 23;
-
-  const byArticle = useMemo(() => {
-    const m = new Map();
-    paidBills.forEach((b) => b.lines.forEach((l) => {
-      const e = m.get(l.articleId) || { name: l.name, category: l.category, qty: 0, rev: 0, cost: 0 };
-      e.qty += l.qty; e.rev += l.price * l.qty; e.cost += l.cost * l.qty;
-      m.set(l.articleId, e);
-    }));
-    return Array.from(m.values()).map((e) => ({ ...e, profit: e.rev - e.cost })).sort((a, b) => b.profit - a.profit);
-  }, [paidBills]);
-
-  const byStaff = useMemo(() => {
-    const m = new Map();
-    paidBills.forEach((b) => {
-      const e = m.get(b.staffId) || { name: b.staffName, bills: 0, rev: 0 };
-      e.bills++; e.rev += b.total;
-      m.set(b.staffId, e);
-    });
-    return Array.from(m.values()).sort((a, b) => b.rev - a.rev);
-  }, [paidBills]);
-  const staffMax = byStaff.length ? byStaff[0].rev : 1;
-
-  const cash = round2(paidBills.filter((b) => b.method === "cash").reduce((s, b) => s + b.total, 0));
+  const seg = (k, label) => (
+    <button key={k} onClick={() => { setMode(k); setAnchor(new Date()); }} style={{
+      padding: "7px 15px", borderRadius: 8, border: "none", cursor: "pointer",
+      background: mode === k ? C.brass : "transparent",
+      color: mode === k ? C.onBrass : C.sage,
+      fontFamily: SANS, fontWeight: 700, fontSize: 12.5,
+    }}>{label}</button>
+  );
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
-        {[["today", "Today"], ["week", "Last 7 days"]].map(([k, l]) => (
-          <button key={k} onClick={() => setRange(k)} style={{
-            padding: "7px 14px", borderRadius: 9, border: `1px solid ${range === k ? C.brass : C.line}`,
-            background: range === k ? "rgba(230,180,80,0.1)" : "transparent", color: range === k ? C.brass : C.sage,
-            fontFamily: SANS, fontWeight: 600, fontSize: 13, cursor: "pointer",
-          }}>{l}</button>
-        ))}
+      {/* period control */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", background: C.raise, border: `1px solid ${C.line}`, borderRadius: 10, padding: 3 }}>
+          {seg("day", "Day")}{seg("week", "Week")}{seg("month", "Month")}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <Btn size="sm" icon={ChevronLeft} title="Earlier" onClick={() => setAnchor(stepAnchor(mode, anchor, -1))} />
+          <span style={{ fontFamily: SANS, fontWeight: 700, fontSize: 13.5, color: C.cream, minWidth: 116, textAlign: "center" }}>
+            {periodLabel(mode, anchor)}
+          </span>
+          <Btn size="sm" icon={ChevronRight} title="Later" disabled={atToday}
+            onClick={() => setAnchor(stepAnchor(mode, anchor, 1))} />
+        </div>
         {loading && <Loader2 size={14} color={C.sageDim} className="animate-spin" />}
+        <Btn size="sm" icon={exporting ? Loader2 : Download} onClick={onExport} disabled={exporting}
+          style={{ marginLeft: "auto" }}>
+          Export CSV
+        </Btn>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(148px,1fr))", gap: 12 }}>
-        <Stat label="Collected" value={money(revenue, cur)} sub={`${paidBills.length} paid bills`} />
-        <Stat label="Goods cost" value={money(cost, cur)} sub="what it cost you" />
-        <Stat label="Profit" value={money(profit, cur)} accent={C.brass} sub={`${margin.toFixed(0)}% margin`} />
-        <Stat label="Average bill" value={money(avg, cur)} sub={`cash ${money(cash, cur)} · card ${money(revenue - cash, cur)}`} />
-        <Stat label="Still open" value={money(openValue, cur)} accent={open.length ? C.mint : C.cream} sub={`${open.length} tables running`} />
-        <Stat label="Unpaid" value={money(unpaidTotal, cur)} accent={unpaid.length ? C.copper : C.cream} sub={`${unpaid.length} bills on the tab`} />
-        {(() => {
-          const vat = {};
-          paidBills.forEach((b) => (b.vatBreakdown || []).forEach((v) => {
-            vat[v.rate] = (vat[v.rate] || 0) + Number(v.vat || 0);
-          }));
-          const totalVat = Object.values(vat).reduce((a, x) => a + x, 0);
-          if (!totalVat) return null;
-          return (
-            <Stat
-              label="VAT in these takings"
-              value={money(round2(totalVat), cur)}
-              sub={Object.entries(vat).sort((a, b) => b[0] - a[0])
-                .map(([r, v]) => `${r}%: ${money(round2(v), cur)}`).join(" · ")}
-            />
-          );
-        })()}
-      </div>
-
-      {(() => {
-        const stuck = bills.filter((b) => b.paid && (b.fiscalStatus === "pending" || b.fiscalStatus === "failed"));
-        if (!stuck.length) return null;
-        return (
-          <div style={{ marginTop: 16, background: C.panel, border: "1px solid rgba(212,103,74,0.4)", borderRadius: 14, overflow: "hidden" }}>
-            <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              <AlertTriangle size={14} color={C.copper} />
-              <Eyebrow style={{ color: C.copper }}>Paid but no fiscal receipt</Eyebrow>
-              <span style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim, marginLeft: "auto" }}>
-                {stuck.length} bill{stuck.length > 1 ? "s" : ""} · {money(round2(stuck.reduce((a, b) => a + b.total, 0)), cur)}
-              </span>
-            </div>
-            {stuck.slice(0, 8).map((b) => (
-              <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", borderBottom: `1px solid ${C.line}55`, flexWrap: "wrap" }}>
-                <span style={{ fontFamily: MONO, fontWeight: 700, color: C.brass, width: 40 }}>{b.tableLabel}</span>
-                <span style={{ fontFamily: SANS, fontSize: 12, color: C.sage, flex: 1, minWidth: 140 }}>
-                  {new Date(b.closedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
-                  {b.fiscalError ? ` · ${b.fiscalError}` : " · waiting for the printer"}
-                </span>
-                <span style={{ fontFamily: MONO, fontSize: 14, color: C.cream }}>{money(b.total, cur)}</span>
-              </div>
-            ))}
-            <div style={{ padding: "10px 16px", fontFamily: SANS, fontSize: 11.5, color: C.sageDim, lineHeight: 1.5 }}>
-              A cash sale needs a fiscal receipt at the time of payment. Check the
-              printer — see docs/fiscal-bridge.md.
-            </div>
+      {/* headline numbers */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12 }}>
+        <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: "16px 18px" }}>
+          <Eyebrow>Collected</Eyebrow>
+          <div style={{ fontFamily: MONO, fontSize: 26, fontWeight: 600, color: C.cream, marginTop: 8, letterSpacing: "-0.02em" }}>
+            {money(gross, cur)}<Delta now={gross} before={Number(prev.gross) || 0} />
           </div>
-        );
-      })()}
+          <div style={{ fontFamily: SANS, fontSize: 12, color: C.sageDim, marginTop: 4 }}>
+            {t.bills || 0} bills · avg {money(Number(t.avg) || 0, cur)}
+          </div>
+        </div>
 
+        <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: "16px 18px" }}>
+          <Eyebrow>Profit</Eyebrow>
+          <div style={{ fontFamily: MONO, fontSize: 26, fontWeight: 600, color: C.brass, marginTop: 8, letterSpacing: "-0.02em" }}>
+            {money(profit, cur)}<Delta now={profit} before={Number(prev.profit) || 0} />
+          </div>
+          <div style={{ fontFamily: SANS, fontSize: 12, color: C.sageDim, marginTop: 4 }}>
+            {margin.toFixed(0)}% margin · cost {money(cost, cur)}
+          </div>
+        </div>
+
+        <Stat label="Cash / card" value={money(Number(t.cash) || 0, cur)}
+          sub={`card ${money(Number(t.card) || 0, cur)}`} />
+
+        {totalVat > 0 && (
+          <Stat label="VAT in these takings" value={money(round2(totalVat), cur)}
+            sub={vat.map((v) => `${Number(v.rate)}%: ${money(Number(v.vat) || 0, cur)}`).join(" · ")} />
+        )}
+      </div>
+
+      {/* things that need doing */}
+      {(att.noFiscal > 0 || att.unpaidBills > 0 || att.zeroCostItems > 0) && (
+        <div style={{ marginTop: 16, display: "grid", gap: 8 }}>
+          {att.noFiscal > 0 && (
+            <Notice tone={C.copper} icon={AlertTriangle}>
+              {att.noFiscal} paid bill{att.noFiscal > 1 ? "s" : ""} with no fiscal receipt. A cash sale
+              needs one at the time of payment — check the printer.
+            </Notice>
+          )}
+          {att.unpaidBills > 0 && (
+            <Notice tone={C.brass} icon={Receipt}>
+              {att.unpaidBills} bill{att.unpaidBills > 1 ? "s" : ""} left on the tab,
+              {" "}{money(Number(att.unpaidTotal) || 0, cur)} outstanding.
+            </Notice>
+          )}
+          {att.zeroCostItems > 0 && (
+            <Notice tone={C.sage} icon={ListOrdered}>
+              {att.zeroCostItems} item{att.zeroCostItems > 1 ? "s" : ""} still have no purchase price,
+              so profit here is overstated. Fill them in under Price list.
+            </Notice>
+          )}
+        </div>
+      )}
+
+      {/* unpaid, with settle buttons */}
       {unpaid.length > 0 && (
-        <div style={{ marginTop: 16, background: C.panel, border: `1px solid rgba(212,103,74,0.35)`, borderRadius: 14, overflow: "hidden" }}>
-          <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 8 }}>
-            <AlertTriangle size={14} color={C.copper} />
-            <Eyebrow style={{ color: C.copper }}>Bills marked not paid</Eyebrow>
+        <div style={{ marginTop: 16, background: C.panel, border: `1px solid ${C.a35}`, borderRadius: 14, overflow: "hidden" }}>
+          <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.line}` }}>
+            <Eyebrow style={{ color: C.brass }}>On the tab</Eyebrow>
           </div>
           {unpaid.map((b) => (
-            <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 16px", borderBottom: `1px solid ${C.line}55`, flexWrap: "wrap" }}>
+            <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 16px`, borderBottom: `1px solid ${C.lineFade}`, flexWrap: `wrap" }}>
               <span style={{ fontFamily: MONO, fontWeight: 700, color: C.brass, width: 40 }}>{b.tableLabel}</span>
               <span style={{ fontFamily: SANS, fontSize: 12.5, color: C.sage, flex: 1, minWidth: 120 }}>
-                {b.staffName} · {shortDate(b.closedAt)} {new Date(b.closedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                {b.staffName} · {shortDate(b.closedAt)}
               </span>
               <span style={{ fontFamily: MONO, fontSize: 15, color: C.cream }}>{money(b.total, cur)}</span>
               <div style={{ display: "flex", gap: 6 }}>
@@ -1134,68 +1266,84 @@ function Reports({ bills: allBills, unpaid, orders, venue, range, setRange, load
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
-        <div style={{ flex: "1 1 380px", minWidth: 280, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 18 }}>
-          <Eyebrow>Takings by hour</Eyebrow>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 150, marginTop: 16 }}>
-            {byHour.slice(firstH, lastH + 1).map((v, i) => (
-              <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                <div title={money(v, cur)} style={{
-                  width: "100%", height: `${Math.max(2, (v / peak) * 118)}px`, borderRadius: "4px 4px 2px 2px",
-                  background: v === peak && v > 0 ? `linear-gradient(180deg, ${C.brass}, ${C.brassDim})` : "linear-gradient(180deg, #34564A, #22392F)",
-                }} />
-                <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.sageDim }}>{firstH + i}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ flex: "1 1 260px", minWidth: 240, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 18 }}>
-          <Eyebrow>Taken by each waiter</Eyebrow>
-          <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
-            {byStaff.map((s, i) => (
-              <div key={i}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                  <span style={{ fontFamily: SANS, fontSize: 12.5, color: C.cream }}>{s.name}</span>
-                  <span style={{ fontFamily: MONO, fontSize: 12, color: C.sage }}>{money(s.rev, cur)} · {s.bills}</span>
-                </div>
-                <div style={{ height: 5, background: C.raise, borderRadius: 99, overflow: "hidden" }}>
-                  <div style={{ width: `${(s.rev / staffMax) * 100}%`, height: "100%", background: C.brass, borderRadius: 99 }} />
-                </div>
-              </div>
-            ))}
-            {!byStaff.length && <div style={{ fontFamily: SANS, fontSize: 13, color: C.sageDim }}>No closed bills in this period yet.</div>}
-          </div>
-        </div>
+      {/* chart */}
+      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 18, marginTop: 16 }}>
+        <Eyebrow>{mode === "day" ? "Takings by hour" : "Takings by day"}</Eyebrow>
+        <Bars series={report?.series || []} cur={cur} />
       </div>
 
+      <div style={{ display: "flex", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
+        {mode !== "day" && (
+          <Panel title="Best nights" flex="1 1 260px">
+            <SplitList rows={report?.byWeekday || []} cur={cur}
+              sub={(r) => `${r.days} day${r.days > 1 ? "s" : ""}`} />
+          </Panel>
+        )}
+        <Panel title="Taken by each waiter" flex="1 1 260px">
+          <SplitList rows={report?.byStaff || []} cur={cur} sub={(r) => `${r.bills} bills`} />
+        </Panel>
+        <Panel title="Where the money comes from" flex="1 1 260px">
+          <SplitList rows={report?.byCategory || []} cur={cur} nameKey="category" />
+        </Panel>
+      </div>
+
+      {/* best earners */}
       <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, marginTop: 16, overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 54px 88px 88px", gap: 8, padding: "11px 16px", background: C.raise, borderBottom: `1px solid ${C.line}` }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 48px 82px 82px", gap: 8, padding: "11px 16px", background: C.raise, borderBottom: `1px solid ${C.line}` }}>
           <Eyebrow>Best earners</Eyebrow>
           <Eyebrow style={{ textAlign: "right" }}>Qty</Eyebrow>
           <Eyebrow style={{ textAlign: "right" }}>Sold</Eyebrow>
           <Eyebrow style={{ textAlign: "right" }}>Profit</Eyebrow>
         </div>
-        <div style={{ maxHeight: 340, overflowY: "auto" }}>
-          {byArticle.slice(0, 14).map((a, i) => (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 54px 88px 88px", gap: 8, padding: "10px 16px", borderBottom: `1px solid ${C.line}55`, alignItems: "center" }}>
+        <div style={{ maxHeight: 380, overflowY: "auto" }}>
+          {(report?.topItems || []).map((a, i) => (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 48px 82px 82px", gap: 8, padding: "10px 16px`, borderBottom: `1px solid ${C.lineFade}`, alignItems: `center" }}>
               <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 <span style={{ fontFamily: SANS, fontSize: 13, color: C.cream }}>{a.name}</span>
                 <span style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim, marginLeft: 8 }}>{a.category}</span>
               </div>
               <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.sage, textAlign: "right" }}>{a.qty}</span>
-              <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.creamDim, textAlign: "right" }}>{money(a.rev, cur)}</span>
-              <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.brass, textAlign: "right" }}>{money(a.profit, cur)}</span>
+              <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.creamDim, textAlign: "right" }}>{money(Number(a.gross) || 0, cur)}</span>
+              <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.brass, textAlign: "right" }}>{money(Number(a.profit) || 0, cur)}</span>
             </div>
           ))}
-          {!byArticle.length && <div style={{ padding: 20, fontFamily: SANS, fontSize: 13, color: C.sageDim }}>Close a table and it will show up here.</div>}
+          {!(report?.topItems || []).length && (
+            <div style={{ padding: 20, fontFamily: SANS, fontSize: 13, color: C.sageDim }}>
+              Close a bill and it will show up here.
+            </div>
+          )}
         </div>
+      </div>
+
+      <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim, marginTop: 14, lineHeight: 1.5 }}>
+        A day runs from {String(report?.cutoffHour ?? 5).padStart(2, "0")}:00 to
+        {" "}{String(report?.cutoffHour ?? 5).padStart(2, "0")}:00, so late trade counts
+        towards the night it started.
       </div>
     </div>
   );
 }
 
-/* --------------------------------------------------------------- owner team */
+function Panel({ title, children, flex }) {
+  return (
+    <div style={{ flex, minWidth: 240, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 18 }}>
+      <Eyebrow>{title}</Eyebrow>
+      {children}
+    </div>
+  );
+}
+
+function Notice({ tone, icon: Icon, children }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "flex-start", gap: 10, padding: "11px 14px",
+      background: `${tone}12`, border: `1px solid ${tone}44`, borderRadius: 11,
+    }}>
+      <Icon size={15} color={tone} style={{ flexShrink: 0, marginTop: 1 }} />
+      <span style={{ fontFamily: SANS, fontSize: 12.5, color: C.cream, lineHeight: 1.5 }}>{children}</span>
+    </div>
+  );
+}
 
 function Team({ venue, staff, flash, actions }) {
   const [editing, setEditing] = useState(null);
@@ -1228,7 +1376,7 @@ function Team({ venue, staff, flash, actions }) {
 
       <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, overflow: "hidden", marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderBottom: `1px solid ${C.line}` }}>
-          <div style={{ width: 34, height: 34, borderRadius: 9, background: "rgba(230,180,80,0.12)", border: `1px solid ${C.brassDim}`, display: "grid", placeItems: "center" }}>
+          <div style={{ width: 34, height: 34, borderRadius: 9, background: `${C.a12}`, border: `1px solid ${C.brassDim}`, display: "grid", placeItems: "center" }}>
             <ShieldCheck size={15} color={C.brass} />
           </div>
           <div style={{ flex: 1 }}>
@@ -1238,7 +1386,7 @@ function Team({ venue, staff, flash, actions }) {
           <span style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>PIN set at setup</span>
         </div>
         {staff.map((s) => (
-          <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: `1px solid ${C.line}55` }}>
+          <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: `1px solid ${C.lineFade}` }}>
             <div style={{ width: 34, height: 34, borderRadius: 9, background: C.raise, border: `1px solid ${C.line}`, display: "grid", placeItems: "center", fontFamily: MONO, color: C.sage, fontSize: 13 }}>
               {s.name.slice(0, 1).toUpperCase() || "?"}
             </div>
@@ -1260,7 +1408,7 @@ function Team({ venue, staff, flash, actions }) {
         </div>
         <button onClick={() => actions.setDiscountPolicy(!venue.allowStaffDiscount)} style={{
           width: 50, height: 28, borderRadius: 99, border: `1px solid ${venue.allowStaffDiscount ? C.brass : C.line2}`,
-          background: venue.allowStaffDiscount ? "rgba(230,180,80,0.2)" : C.raise, cursor: "pointer", position: "relative", padding: 0,
+          background: venue.allowStaffDiscount ? `${C.a20}` : C.raise, cursor: "pointer", position: "relative", padding: 0,
         }}>
           <span style={{
             position: "absolute", top: 3, left: venue.allowStaffDiscount ? 25 : 3, width: 20, height: 20,
@@ -1284,6 +1432,139 @@ function Team({ venue, staff, flash, actions }) {
           </div>
         </Modal>
       )}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- branding */
+
+function Branding({ venue, flash, actions }) {
+  const [accent, setAccent] = useState(venue.brandAccent || DEFAULT_BRAND.accent);
+  const [surface, setSurface] = useState(venue.brandSurface || DEFAULT_BRAND.surface);
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef(null);
+
+  // Preview live, so a choice can be judged rather than imagined.
+  useEffect(() => { applyTheme({ accent, surface }); }, [accent, surface]);
+
+  const valid = !!parseHex(accent);
+  const ratio = valid ? contrast(buildTheme({ accent, surface }).accent, SURFACES[surface].ink) : 0;
+
+  const save = async () => {
+    if (!valid) return flash("That isn't a colour — use a hex like #E6B450");
+    setBusy(true);
+    const ok = await actions.saveBranding({ accent, surface });
+    setBusy(false);
+    if (ok) { rememberBrand({ accent, surface }); flash("Branding saved"); }
+  };
+
+  const pickLogo = async (file) => {
+    if (!file) return;
+    if (file.size > 512 * 1024) return flash("Logo must be under 512 KB");
+    if (!/^image\/(png|jpeg|webp|svg\+xml)$/.test(file.type)) return flash("Use a PNG, JPG, WebP or SVG");
+    setBusy(true);
+    const url = await actions.uploadLogo(file);
+    setBusy(false);
+    if (url) flash("Logo updated");
+  };
+
+  return (
+    <div style={{ display: "grid", gap: 16, maxWidth: 620 }}>
+      <div>
+        <Eyebrow>Make it theirs</Eyebrow>
+        <div style={{ fontFamily: SANS, fontSize: 13, color: C.sageDim, marginTop: 4, lineHeight: 1.5 }}>
+          Staff see this on the sign-in screen and in the header. Changes preview
+          as you pick them.
+        </div>
+      </div>
+
+      {/* logo */}
+      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16,
+        display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+        <Mark logoUrl={venue.logoUrl} size={56} radius={13} />
+        <div style={{ flex: 1, minWidth: 160 }}>
+          <div style={{ fontFamily: SANS, fontSize: 14, fontWeight: 600, color: C.cream }}>Logo</div>
+          <div style={{ fontFamily: SANS, fontSize: 12, color: C.sageDim, marginTop: 3, lineHeight: 1.45 }}>
+            Square works best. PNG with a transparent background looks cleanest on dark.
+            Under 512 KB.
+          </div>
+        </div>
+        <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml"
+          style={{ display: "none" }} onChange={(e) => pickLogo(e.target.files?.[0])} />
+        <Btn icon={ImageIcon} disabled={busy} onClick={() => fileRef.current?.click()}>
+          {venue.logoUrl ? "Replace" : "Upload"}
+        </Btn>
+        {venue.logoUrl && (
+          <Btn variant="bare" icon={Trash2} disabled={busy} style={{ color: C.sageDim }}
+            onClick={() => actions.removeLogo()} />
+        )}
+      </div>
+
+      {/* surface */}
+      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16 }}>
+        <Eyebrow style={{ marginBottom: 10 }}>Room tone</Eyebrow>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 8 }}>
+          {Object.entries(SURFACES).map(([key, sf]) => (
+            <button key={key} onClick={() => setSurface(key)} style={{
+              padding: 10, borderRadius: 11, cursor: "pointer", textAlign: "left",
+              border: `1px solid ${surface === key ? C.brass : C.line}`,
+              background: sf.ink,
+            }}>
+              <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+                {[sf.panel, sf.raise, sf.line2].map((c, i) => (
+                  <span key={i} style={{ width: 14, height: 14, borderRadius: 4, background: c,
+                    border: `1px solid ${sf.line}` }} />
+                ))}
+                <span style={{ width: 14, height: 14, borderRadius: 4, background: accent }} />
+              </div>
+              <div style={{ fontFamily: SANS, fontSize: 12, fontWeight: 600,
+                color: surface === key ? C.brass : sf.cream }}>{sf.name}</div>
+            </button>
+          ))}
+        </div>
+        <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim, marginTop: 10, lineHeight: 1.45 }}>
+          All dark on purpose. A bright screen in a dim room blinds whoever is
+          holding it and washes out the floor plan.
+        </div>
+      </div>
+
+      {/* accent */}
+      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16 }}>
+        <Eyebrow style={{ marginBottom: 10 }}>Accent</Eyebrow>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          {ACCENT_SUGGESTIONS.map((hex) => (
+            <button key={hex} onClick={() => setAccent(hex)} title={hex} style={{
+              width: 34, height: 34, borderRadius: 9, background: hex, cursor: "pointer",
+              border: accent.toLowerCase() === hex.toLowerCase()
+                ? `2px solid ${C.cream}` : `1px solid ${C.line2}`,
+            }} />
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div style={{ flex: "1 1 150px" }}>
+            <Field label="Hex" value={accent} onChange={setAccent} mono placeholder="#E6B450" />
+          </div>
+          <input type="color" value={parseHex(accent) ? accent : "#E6B450"}
+            onChange={(e) => setAccent(e.target.value)}
+            style={{ width: 46, height: 42, background: "transparent", border: `1px solid ${C.line}`,
+              borderRadius: 9, cursor: "pointer", padding: 3 }} />
+        </div>
+        {valid && ratio < 4.5 && (
+          <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.copper, marginTop: 10, lineHeight: 1.45 }}>
+            That colour is dim against this surface, so it gets lightened
+            automatically to stay readable. Pick something brighter for an exact match.
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: 8 }}>
+        <Btn variant="ghost" onClick={() => {
+          setAccent(venue.brandAccent || DEFAULT_BRAND.accent);
+          setSurface(venue.brandSurface || DEFAULT_BRAND.surface);
+        }}>Revert</Btn>
+        <Btn variant="solid" icon={busy ? Loader2 : Check} disabled={busy} onClick={save}
+          style={{ flex: 1 }}>Save branding</Btn>
+      </div>
     </div>
   );
 }
@@ -1339,7 +1620,7 @@ function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loadi
           const st = states[i], meta = STATE_META[st];
           const todayTotal = todayByBar[v.id] || 0;
           return (
-            <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderBottom: `1px solid ${C.line}55`, flexWrap: "wrap" }}>
+            <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px`, borderBottom: `1px solid ${C.lineFade}`, flexWrap: `wrap" }}>
               <div style={{ minWidth: 160, flex: "1 1 160px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span style={{ fontFamily: SANS, fontWeight: 700, fontSize: 15, color: C.cream }}>{v.name}</span>
@@ -1392,7 +1673,7 @@ function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loadi
                 <button key={p.id} onClick={() => changePlan(v, p.id)} style={{
                   flex: 1, padding: "11px 8px", borderRadius: 11, cursor: "pointer",
                   border: `1px solid ${v.subscription.plan === p.id ? C.brass : C.line}`,
-                  background: v.subscription.plan === p.id ? "rgba(230,180,80,0.1)" : "transparent",
+                  background: v.subscription.plan === p.id ? `${C.a10}` : "transparent",
                 }}>
                   <div style={{ fontFamily: SANS, fontSize: 12.5, fontWeight: 700, color: v.subscription.plan === p.id ? C.brass : C.cream }}>{p.name}</div>
                   <div style={{ fontFamily: MONO, fontSize: 12, color: C.sage, marginTop: 3 }}>{money(p.price, "EUR")}/mo</div>
@@ -1434,7 +1715,7 @@ function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loadi
             <Eyebrow style={{ marginBottom: 8 }}>Payment history</Eyebrow>
             <div style={{ maxHeight: 160, overflowY: "auto" }}>
               {[...v.subscription.payments].reverse().map((p) => (
-                <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${C.line}55`, fontFamily: MONO, fontSize: 12.5 }}>
+                <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${C.lineFade}`, fontFamily: MONO, fontSize: 12.5 }}>
                   <span style={{ color: C.sage }}>{shortDate(p.paidAt)}</span>
                   <span style={{ color: C.sageDim, fontFamily: SANS, fontSize: 11.5 }}>{p.note}</span>
                   <span style={{ color: C.cream }}>{money(p.amount)}</span>
@@ -1487,7 +1768,7 @@ function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loadi
                   <button key={p.id} onClick={() => setAdding({ ...adding, plan: p.id })} style={{
                     flex: 1, padding: "9px 6px", borderRadius: 10, cursor: "pointer",
                     border: `1px solid ${adding.plan === p.id ? C.brass : C.line}`,
-                    background: adding.plan === p.id ? "rgba(230,180,80,0.1)" : "transparent",
+                    background: adding.plan === p.id ? `${C.a10}` : "transparent",
                     color: adding.plan === p.id ? C.brass : C.sage, fontFamily: SANS, fontSize: 12, fontWeight: 700,
                   }}>{p.name}<div style={{ fontFamily: MONO, fontSize: 11, opacity: 0.8, marginTop: 2 }}>{money(p.price, "EUR")}</div></button>
                 ))}
@@ -1578,7 +1859,7 @@ function InstallBar({ prompt }) {
   return (
     <div style={{
       display: "flex", alignItems: "center", gap: 12, padding: "10px 16px",
-      background: "rgba(230,180,80,0.08)", borderBottom: `1px solid ${C.brassDim}`, flexWrap: "wrap",
+      background: `${C.a08}`, borderBottom: `1px solid ${C.brassDim}`, flexWrap: "wrap",
     }}>
       <Download size={15} color={C.brass} />
       <span style={{ fontSize: 12.5, color: C.brass, flex: 1, minWidth: 180 }}>
@@ -1588,6 +1869,29 @@ function InstallBar({ prompt }) {
       </span>
       {prompt.canPrompt && <Btn size="sm" variant="solid" onClick={prompt.install}>Install</Btn>}
       <Btn size="sm" variant="bare" icon={X} onClick={prompt.dismiss} />
+    </div>
+  );
+}
+
+/* A bar's own mark where ours used to be. Falls back to the glass, and falls
+   back again if the image 404s — a broken logo must not leave a blank header. */
+function Mark({ logoUrl, size = 30, radius = 8 }) {
+  const [failed, setFailed] = useState(false);
+  if (logoUrl && !failed) {
+    return (
+      <img
+        src={logoUrl} alt="" width={size} height={size} onError={() => setFailed(true)}
+        style={{ width: size, height: size, borderRadius: radius, objectFit: "cover",
+          border: `1px solid ${C.line2}`, background: C.raise, flexShrink: 0 }}
+      />
+    );
+  }
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: radius, border: `1.5px solid ${C.brass}`,
+      display: "grid", placeItems: "center", boxShadow: `0 0 18px -4px ${C.glow}`, flexShrink: 0,
+    }}>
+      <Wine size={size * 0.5} color={C.brass} />
     </div>
   );
 }
@@ -1630,6 +1934,11 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const now = useNow(20000);
   const installPrompt = useInstallPrompt();
+  const [logoStamp, setLogoStamp] = useState(1);
+
+  // Last known branding, so the app opens in the bar's colours rather than
+  // flashing ours first.
+  useEffect(() => { applyTheme(recallBrand()); }, []);
 
   const flash = useCallback((msg) => {
     setToast(msg);
@@ -1668,7 +1977,11 @@ export default function App() {
   } = useBarData(session && session.role !== "platform" ? session : null);
   const client = useMemo(() => (session ? clientFor(session) : null), [session]);
 
-  const venue = data?.venue || null;
+  const venueRaw = data?.venue || null;
+  const venue = useMemo(() => {
+    if (!venueRaw) return null;
+    return { ...venueRaw, logoUrl: client ? api.logoUrl(client, venueRaw.logoPath, logoStamp) : null };
+  }, [venueRaw, client, logoStamp]);
   const zones = data?.zones || [];
   const articles = data?.articles || [];
   const orders = data?.orders || {};
@@ -1676,6 +1989,13 @@ export default function App() {
   useEffect(() => {
     if (zones.length && (!zoneId || !zones.some((z) => z.id === zoneId))) setZoneId(zones[0].id);
   }, [zones, zoneId]);
+
+  useEffect(() => {
+    if (!venue) return;
+    const brand = { accent: venue.brandAccent, surface: venue.brandSurface };
+    applyTheme(brand);
+    rememberBrand(brand);
+  }, [venue?.brandAccent, venue?.brandSurface, venue]);
 
   const zone = zones.find((z) => z.id === zoneId) || zones[0] || null;
   const table = zone?.tables.find((t) => t.id === openTableId) || null;
@@ -1692,7 +2012,11 @@ export default function App() {
   const doPair = async (code) => {
     setAuthBusy(true); setLoginError("");
     try {
-      setPaired(await pairDevice(code));
+      const bar = await pairDevice(code);
+      setPaired(bar);
+      const brand = { accent: bar.accent, surface: bar.surface };
+      applyTheme(brand);
+      rememberBrand(brand);
     } catch (e) { setLoginError(e.message); }
     finally { setAuthBusy(false); }
   };
@@ -1717,6 +2041,7 @@ export default function App() {
   const doSignOut = async () => {
     await signOut();
     setSession(null); setOpenTableId(null); setLoginError("");
+    applyTheme(recallBrand());
   };
 
   /* ---- actions the screens call ---- */
@@ -1743,6 +2068,16 @@ export default function App() {
     saveStaff: (s2) => guard((c) => api.upsertStaff(c, venue.id, s2), "Team updated"),
     removeStaff: (id) => guard((c) => api.deactivateStaff(c, id)),
     setDiscountPolicy: (v) => guard((c) => api.setDiscountPolicy(c, venue.id, v)),
+    saveBranding: (b) => guard((c) => api.setBranding(c, venue.id, b)),
+    uploadLogo: async (file) => {
+      const ok = await guard((c) => api.uploadLogo(c, venue.id, file));
+      if (ok) setLogoStamp(Date.now());
+      return ok;
+    },
+    removeLogo: () => guard(async (c) => {
+      await api.removeLogo(c, venue.id, venue.logoPath);
+      setLogoStamp(Date.now());
+    }),
   }), [guard, client, venue, flash]);
 
   /* ---- orders: these are the writes that must survive a dead connection ---- */
@@ -1793,26 +2128,28 @@ export default function App() {
   };
 
   /* ---- owner reports ---- */
-  const [range, setRange] = useState("today");
-  const [bills, setBills] = useState([]);
+  const [mode, setMode] = useState("day");
+  const [anchor, setAnchor] = useState(() => new Date());
+  const [report, setReport] = useState(null);
   const [unpaid, setUnpaid] = useState([]);
-  const [billsLoading, setBillsLoading] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const range = useMemo(() => periodRange(mode, anchor), [mode, anchor]);
 
   const loadReports = useCallback(async () => {
     if (!client || !venue || session?.role !== "owner") return;
-    setBillsLoading(true);
+    setReportLoading(true);
     try {
-      const from = range === "today"
-        ? new Date(new Date().setHours(0, 0, 0, 0)).toISOString()
-        : new Date(Date.now() - 7 * DAY).toISOString();
-      const [b, u] = await Promise.all([
-        api.loadBills(client, venue.id, from),
+      const [rep, un] = await Promise.all([
+        api.loadReport(client, venue.id, range.from, range.to, mode === "day" ? "hour" : "day"),
         api.loadUnpaidBills(client, venue.id),
       ]);
-      setBills(b); setUnpaid(u);
+      setReport(rep);
+      setUnpaid(un);
     } catch (e) { flash(e.message); }
-    finally { setBillsLoading(false); }
-  }, [client, venue, session, range, flash]);
+    finally { setReportLoading(false); }
+  }, [client, venue, session, range.from, range.to, mode, flash]);
 
   useEffect(() => {
     if (tab === "reports") loadReports();
@@ -1824,6 +2161,35 @@ export default function App() {
       await loadReports();
       flash("Bill marked as paid");
     } catch (e) { flash(e.message); }
+  };
+
+  /* CSV for the accountant. Built from line-level rows, not the summary — an
+     accountant needs to see the VAT rate on each line, not a total. */
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const rows = await api.loadReportRows(client, venue.id, range.from, range.to);
+      if (!rows.length) { flash("Nothing to export in this period"); return; }
+
+      const cols = ["day", "closed_at", "table_label", "staff", "method",
+                    "item", "category", "qty", "unit_price", "vat_rate",
+                    "line_total", "receipt_no"];
+      const esc = (v) => {
+        const t = v == null ? "" : String(v);
+        return /[",\n;]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+      };
+      // Semicolons: Excel in this region splits on ; not , by default.
+      const csv = [cols.join(";"), ...rows.map((r) => cols.map((c) => esc(r[c])).join(";"))].join("\r\n");
+
+      const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `${venue.name.replace(/\s+/g, "-")}-${range.from}-to-${range.to}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      flash(`${rows.length} lines exported`);
+    } catch (e) { flash(e.message); }
+    finally { setExporting(false); }
   };
 
   /* ---- platform dashboard ---- */
@@ -1894,7 +2260,8 @@ export default function App() {
     return (
       <AuthScreen
         platformName="Backbar"
-        pairedVenue={paired}
+        pairedVenue={paired ? { ...paired, logoUrl: paired.logoPath
+          ? `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/logos/${paired.logoPath}` : null } : null}
         busy={authBusy}
         onPair={doPair}
         onUnpair={() => { clearPairing(); setPaired(null); }}
@@ -1926,7 +2293,7 @@ export default function App() {
   const tabs = isPlatform
     ? [["bars", "Bars & billing", Store]]
     : isOwner
-    ? [["floor", "Floor", LayoutGrid], ["design", "Floor designer", Copy], ["menu", "Price list", ListOrdered], ["reports", "Money", BarChart3], ["team", "Team", Users]]
+    ? [["floor", "Floor", LayoutGrid], ["design", "Floor designer", Copy], ["menu", "Price list", ListOrdered], ["reports", "Money", BarChart3], ["team", "Team", Users], ["brand", "Branding", Palette]]
     : [["floor", "Floor", LayoutGrid]];
   const currentTab = tabs.some((t) => t[0] === tab) ? tab : tabs[0][0];
 
@@ -1950,7 +2317,7 @@ export default function App() {
       <InstallBar prompt={installPrompt} />
 
       {session.support && (
-        <div style={{ background: "rgba(230,180,80,0.12)", borderBottom: `1px solid ${C.brassDim}`, padding: "8px 18px", display: "flex", alignItems: "center", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+        <div style={{ background: `${C.a12}`, borderBottom: `1px solid ${C.brassDim}`, padding: "8px 18px", display: "flex", alignItems: "center", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
           <ShieldCheck size={14} color={C.brass} />
           <span style={{ fontSize: 12.5, color: C.brass }}>Support session — inside {venue.name} as the owner.</span>
           <Btn size="sm" icon={ArrowLeft} onClick={doSignOut}>Back to your dashboard</Btn>
@@ -1969,19 +2336,19 @@ export default function App() {
       <header style={{ position: "sticky", top: 0, zIndex: 60, background: "rgba(10,20,17,0.92)", backdropFilter: "blur(10px)", borderBottom: `1px solid ${C.line}` }}>
         <div style={{ maxWidth: 1320, margin: "0 auto", padding: "11px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginRight: "auto" }}>
-            <div style={{ width: 30, height: 30, borderRadius: 8, border: `1.5px solid ${C.brass}`, display: "grid", placeItems: "center", boxShadow: "0 0 18px -4px rgba(230,180,80,0.5)" }}>
+            <div style={{ width: 30, height: 30, borderRadius: 8, border: `1.5px solid ${C.brass}`, display: "grid", placeItems: "center", boxShadow: `0 0 18px -4px ${C.a50}` }}>
               <Wine size={15} color={C.brass} />
             </div>
             <div>
               <div style={{ fontWeight: 800, fontSize: 14, letterSpacing: "0.18em", color: C.cream }}>BACKBAR</div>
               <div style={{ fontSize: 10.5, color: C.sageDim, letterSpacing: "0.1em" }}>
-                {isPlatform ? "PLATFORM DASHBOARD" : venue.name.toUpperCase()}
+                {isPlatform ? "PLATFORM DASHBOARD" : "POWERED BY BACKBAR"}
               </div>
             </div>
           </div>
 
           {!isPlatform && openHere.length > 0 && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", borderRadius: 99, border: `1px solid ${C.brassDim}`, background: "rgba(230,180,80,0.07)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px`, borderRadius: 99, border: `1px solid ${C.brassDim}`, background: `${C.a07}" }}>
               <Clock size={13} color={C.brass} />
               <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.brass }}>
                 {isWaiter ? `${myOpen.length} of ${openHere.length} tables yours` : `${openHere.length} open · ${money(openValue, venue.currency)}`}
@@ -1998,7 +2365,7 @@ export default function App() {
           {!isPlatform && pendingCount > 0 && (
             <button onClick={sync} title="Send now" style={{
               display: "flex", alignItems: "center", gap: 7, padding: "6px 12px", borderRadius: 99,
-              border: `1px solid ${C.brassDim}`, background: "rgba(230,180,80,0.07)", cursor: "pointer",
+              border: `1px solid ${C.brassDim}`, background: `${C.a07}`, cursor: "pointer",
             }}>
               <RefreshCw size={13} color={C.brass} className={syncing ? "animate-spin" : ""} />
               <span style={{ fontFamily: MONO, fontSize: 12, color: C.brass }}>
@@ -2050,12 +2417,12 @@ export default function App() {
                 return (
                   <button key={z.id} onClick={() => setZoneId(z.id)} style={{
                     padding: "8px 14px", borderRadius: 10, border: `1px solid ${z.id === zone.id ? C.brass : C.line}`,
-                    background: z.id === zone.id ? "rgba(230,180,80,0.1)" : "transparent",
+                    background: z.id === zone.id ? `${C.a10}` : "transparent",
                     color: z.id === zone.id ? C.brass : C.sage, fontFamily: SANS, fontWeight: 600, fontSize: 13,
                     cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
                   }}>
                     {z.name}
-                    {n > 0 && <span style={{ fontFamily: MONO, fontSize: 10.5, background: C.brass, color: "#1A1305", borderRadius: 99, padding: "1px 6px" }}>{n}</span>}
+                    {n > 0 && <span style={{ fontFamily: MONO, fontSize: 10.5, background: C.brass, color: C.onBrass, borderRadius: 99, padding: "1px 6px" }}>{n}</span>}
                   </button>
                 );
               })}
@@ -2120,8 +2487,12 @@ export default function App() {
           <PriceList articles={articles} currency={venue.currency} actions={barActions} />
         )}
         {isOwner && currentTab === "reports" && (
-          <Reports bills={bills} unpaid={unpaid} orders={orders} venue={venue}
-            range={range} setRange={setRange} loading={billsLoading} onSettleUnpaid={settleUnpaid} />
+          <Reports
+            venue={venue} report={report} loading={reportLoading}
+            mode={mode} setMode={setMode} anchor={anchor} setAnchor={setAnchor}
+            unpaid={unpaid} onSettleUnpaid={settleUnpaid}
+            onExport={exportCsv} exporting={exporting}
+          />
         )}
         {isOwner && currentTab === "team" && (
           <Team venue={venue} staff={data.staff || []} flash={flash} actions={barActions} />

@@ -117,16 +117,21 @@ export async function settleBill(client, billId, method) {
 
 /* ------------------------------------------------------- reports (owner only) */
 
-export async function loadBills(client, barId, fromISO) {
-  const rows = unwrap(
-    await client
-      .from("bills")
-      .select("*, order:orders(id, order_lines(name, category, qty, unit_price, unit_cost))")
-      .eq("bar_id", barId)
-      .gte("closed_at", fromISO)
-      .order("closed_at", { ascending: true })
+/** One aggregated report. The database does the summing — a month of lines is
+    thousands of rows and bar wifi is not the place to move them. */
+export async function loadReport(client, barId, from, to, bucket = "day") {
+  return unwrap(
+    await client.rpc("bar_report", {
+      p_bar: barId, p_from: from, p_to: to, p_bucket: bucket,
+    })
   );
-  return rows.map(mapBill);
+}
+
+/** Line-level rows for the accountant. Unaggregated on purpose. */
+export async function loadReportRows(client, barId, from, to) {
+  return unwrap(
+    await client.rpc("bar_report_rows", { p_bar: barId, p_from: from, p_to: to })
+  );
 }
 
 export async function loadUnpaidBills(client, barId) {
@@ -139,6 +144,59 @@ export async function loadUnpaidBills(client, barId) {
       .order("closed_at", { ascending: false })
   );
   return rows.map(mapBill);
+}
+
+/** Paid bills with no fiscal receipt — a compliance problem, not a stat. */
+export async function loadFiscalProblems(client, barId) {
+  const rows = unwrap(
+    await client
+      .from("bills")
+      .select("*")
+      .eq("bar_id", barId)
+      .eq("paid", true)
+      .in("fiscal_status", ["pending", "failed"])
+      .order("closed_at", { ascending: false })
+      .limit(20)
+  );
+  return rows.map(mapBill);
+}
+
+export async function setBranding(client, barId, { accent, surface }) {
+  unwrap(await client.rpc("set_branding", {
+    p_bar: barId, p_accent: accent || null, p_surface: surface || null,
+  }));
+}
+
+/** Upload replaces the bar's single logo. The filename is the bar id, so the
+    storage policy can decide ownership from the path without a lookup. */
+export async function uploadLogo(client, barId, file) {
+  const ext = (file.type.split("/")[1] || "png").replace("svg+xml", "svg").replace("jpeg", "jpg");
+  const path = `${barId}.${ext}`;
+
+  const { error } = await client.storage
+    .from("logos")
+    .upload(path, file, { upsert: true, contentType: file.type, cacheControl: "300" });
+  if (error) throw new Error(friendly(error.message));
+
+  unwrap(await client.rpc("set_logo_path", { p_bar: barId, p_path: path }));
+  return path;
+}
+
+export async function removeLogo(client, barId, path) {
+  if (path) await client.storage.from("logos").remove([path]).catch(() => {});
+  unwrap(await client.rpc("set_logo_path", { p_bar: barId, p_path: null }));
+}
+
+/** Public URL for a stored logo. Cache-busted, or a replaced logo keeps
+    showing the old one until the CDN gives up. */
+export function logoUrl(client, path, stamp) {
+  if (!path) return null;
+  const { data } = client.storage.from("logos").getPublicUrl(path);
+  return data?.publicUrl ? `${data.publicUrl}?v=${stamp || 1}` : null;
+}
+
+export async function setDayCutoff(client, barId, hour) {
+  unwrap(await client.from("bars").update({ day_cutoff_hour: hour }).eq("id", barId));
 }
 
 /* ---------------------------------------------------------------- price list */
@@ -282,6 +340,9 @@ function mapBar(b) {
     ownerName: (b.staff || []).find((s) => s.role === "owner")?.name ?? "Owner",
     staff: (b.staff || []).filter((s) => s.role === "waiter" && s.active),
     allowStaffDiscount: b.allow_staff_discount,
+    brandAccent: b.brand_accent,
+    brandSurface: b.brand_surface,
+    logoPath: b.logo_path,
     subscription: {
       plan: b.plan,
       price: num(b.price_monthly),

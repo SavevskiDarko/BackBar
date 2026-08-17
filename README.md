@@ -41,12 +41,10 @@ functions you'll need later for Stripe.
 
 Add a custom domain under Project → Settings → Domains.
 
-**GitHub Pages — alternative.** `.github/workflows/deploy.yml` is already in the
-repo. Set repo Settings → Pages → Source to *GitHub Actions*, and change `base`
-in `vite.config.js` to `"/backbar/"`. No serverless functions, so you'd need
-somewhere else to run Stripe webhooks.
+Deploys are automatic from here on. Nobody runs a build by hand.
 
-Either way, deploys are automatic from here on. Nobody has to run a build by hand.
+Don't add a second deploy path (GitHub Pages, Vercel) alongside this one — the
+unused one silently rots and then starts emailing you about failed builds.
 
 ## 3. Add the database
 
@@ -138,7 +136,7 @@ src/lib/api.js                  every read and write
 src/lib/useBarData.js           realtime floor
 supabase/schema.sql             tables + RLS          (run first)
 supabase/rpc.sql                functions             (run second)
-worker/                         backbar-auth Worker: PIN → JWT
-PORTING.md                      how to wire App.jsx to all of it
-.github/workflows/              GitHub Pages deploy (skip if using Vercel)
+worker/                         the Worker: PIN → JWT, serves the app
+docs/fiscal-bridge.md           contract for a licensed fiscal printer
+PORTING.md                      history of the Supabase port
 ```

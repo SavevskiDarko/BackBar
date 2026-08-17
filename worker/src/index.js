@@ -204,7 +204,12 @@ export default {
         try {
           const row = firstRow(await rpc(env, "bar_public_info", { p_bar_code: barCode }));
           await rpc(env, "login_record", { p_bar_code: barCode, p_ip: ip, p_ok: true });
-          return json({ barId: row.bar_id, barName: row.bar_name }, 200, cors);
+          // Branding comes back with the pairing so the PIN screen is already
+          // the bar's own before anyone has a token.
+          return json({
+            barId: row.bar_id, barName: row.bar_name,
+            accent: row.accent, surface: row.surface, logoPath: row.logo_path,
+          }, 200, cors);
         } catch (e) {
           await rpc(env, "login_record", { p_bar_code: barCode, p_ip: ip, p_ok: false });
           const key = mapDbError(e.message) || "unknown_bar";
