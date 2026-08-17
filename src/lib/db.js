@@ -1,0 +1,171 @@
+/* ===========================================================================
+   Local store — what makes the app work with no wifi.
+
+   Two things live here:
+
+     snapshot   the last known state of the bar (floor, menu, open tables),
+                so a tablet that opens cold on a dead connection still shows
+                the room instead of a spinner.
+
+     outbox     writes that haven't reached the server yet, in order. Each one
+                carries a client-generated UUID, so replaying it is safe.
+
+   IndexedDB rather than localStorage: it survives better under storage
+   pressure, and an evening's orders can outgrow localStorage's few megabytes.
+   =========================================================================== */
+
+const DB_NAME = "backbar";
+const DB_VERSION = 1;
+
+let dbPromise = null;
+
+function open() {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    if (typeof indexedDB === "undefined") return reject(new Error("no indexeddb"));
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains("kv")) db.createObjectStore("kv");
+      if (!db.objectStoreNames.contains("outbox")) {
+        // autoIncrement keeps the queue in the order the waiter acted.
+        db.createObjectStore("outbox", { keyPath: "seq", autoIncrement: true });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  return dbPromise;
+}
+
+function tx(store, mode, fn) {
+  return open().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const t = db.transaction(store, mode);
+        const s = t.objectStore(store);
+        let out;
+        try { out = fn(s); } catch (e) { return reject(e); }
+        t.oncomplete = () => resolve(out?.result !== undefined ? out.result : out);
+        t.onerror = () => reject(t.error);
+        t.onabort = () => reject(t.error);
+      })
+  );
+}
+
+/* ------------------------------------------------------------ the snapshot */
+
+export async function saveSnapshot(barId, data) {
+  try {
+    await tx("kv", "readwrite", (s) => s.put({ barId, data, at: Date.now() }, `snapshot:${barId}`));
+  } catch { /* a full or private-mode store just means no cache */ }
+}
+
+export async function loadSnapshot(barId) {
+  try {
+    const row = await tx("kv", "readonly", (s) => s.get(`snapshot:${barId}`));
+    return row?.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/* --------------------------------------------------------------- the outbox */
+
+/** Queue a write. `op` is the operation name, `payload` everything needed to
+    replay it later — including ids generated up front, so a retry lands on the
+    same rows rather than creating duplicates. */
+export async function enqueue(op, payload) {
+  const item = { op, payload, queuedAt: Date.now(), tries: 0, lastError: null };
+  try {
+    await tx("outbox", "readwrite", (s) => s.add(item));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function peekOutbox() {
+  try {
+    return (await tx("outbox", "readonly", (s) => s.getAll())) || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function outboxCount() {
+  try {
+    return (await tx("outbox", "readonly", (s) => s.count())) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function dropFromOutbox(seq) {
+  try {
+    await tx("outbox", "readwrite", (s) => s.delete(seq));
+  } catch { /* nothing to do */ }
+}
+
+export async function markTried(seq, error) {
+  try {
+    const db = await open();
+    await new Promise((resolve, reject) => {
+      const t = db.transaction("outbox", "readwrite");
+      const s = t.objectStore("outbox");
+      const get = s.get(seq);
+      get.onsuccess = () => {
+        const item = get.result;
+        if (item) {
+          item.tries = (item.tries || 0) + 1;
+          item.lastError = error ? String(error).slice(0, 300) : null;
+          s.put(item);
+        }
+      };
+      t.oncomplete = resolve;
+      t.onerror = () => reject(t.error);
+    });
+  } catch { /* best effort */ }
+}
+
+export async function clearOutbox() {
+  try {
+    await tx("outbox", "readwrite", (s) => s.clear());
+  } catch { /* nothing to do */ }
+}
+
+/* -------------------------------------------------- folding pending writes in
+
+   The floor must show a table as occupied the instant a waiter saves it, even
+   with no signal. So the state the UI renders is the server snapshot with the
+   outbox replayed on top of it, in order. */
+
+export function applyOutbox(snapshot, outbox) {
+  if (!snapshot || !outbox?.length) return snapshot;
+
+  const orders = { ...(snapshot.orders || {}) };
+
+  for (const item of outbox) {
+    const p = item.payload;
+    if (item.op === "order.save") {
+      orders[p.orderId] = {
+        key: p.orderId,
+        id: p.orderId,
+        venueId: p.barId,
+        tableId: p.tableId,
+        tableLabel: p.tableLabel,
+        guests: p.guests,
+        openedAt: p.openedAt,
+        staffId: p.staffId,
+        staffName: p.staffName,
+        lines: p.lines,
+        pending: true, // the UI marks these so staff know they aren't synced
+      };
+    }
+    if (item.op === "order.close" || item.op === "order.cancel") {
+      delete orders[p.orderId];
+    }
+  }
+
+  return { ...snapshot, orders };
+}

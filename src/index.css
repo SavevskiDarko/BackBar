@@ -8,3 +8,16 @@ body {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .animate-spin { animation: spin 1s linear infinite; }
+
+/* A bar tablet is a kiosk: no accidental text selection when a waiter drags a
+   table, no pull-to-refresh mid-order, no zoom from a double tap. */
+body {
+  overscroll-behavior-y: contain;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+input, textarea { -webkit-user-select: text; user-select: text; }
+
+/* Respect the notch when installed to the home screen. */
+#root { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }

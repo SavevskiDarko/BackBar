@@ -44,6 +44,16 @@ class Boundary extends React.Component {
   }
 }
 
+/* Register the service worker so the app opens with no signal. Failure here is
+   not fatal — the app just loses offline shell caching. */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch((e) =>
+      console.warn("Backbar: service worker not registered", e.message)
+    );
+  });
+}
+
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <Boundary>

@@ -14,6 +14,7 @@ import {
 } from "./lib/auth";
 import { useBarData } from "./lib/useBarData";
 import * as api from "./lib/api";
+import { WifiOff, RefreshCw, Download } from "lucide-react";
 
 /* ============================================================================
    BACKBAR — bar floor & order tracking, sold as a subscription
@@ -217,6 +218,22 @@ function useNow(ms = 25000) {
   }, [ms]);
   return now;
 }
+/* A phone is not a small desktop. Below this the order sheet becomes a
+   single pane with a running total bar, rather than two columns that wrap
+   the bill off the bottom of a clipped container. */
+function useNarrow(query = "(max-width: 760px)") {
+  const [hit, setHit] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia(query).matches);
+  useEffect(() => {
+    const m = window.matchMedia(query);
+    const on = (e) => setHit(e.matches);
+    m.addEventListener("change", on);
+    setHit(m.matches);
+    return () => m.removeEventListener("change", on);
+  }, [query]);
+  return hit;
+}
+
 function useWidth(ref) {
   const [w, setW] = useState(0);
   useEffect(() => {
@@ -502,6 +519,8 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
   const [q, setQ] = useState("");
   const [paying, setPaying] = useState(false);
   const [discount, setDiscount] = useState(0);
+  const narrow = useNarrow();
+  const [showBill, setShowBill] = useState(false);
 
   const cats = useMemo(() => ["All", ...Array.from(new Set(articles.map((a) => a.category)))], [articles]);
   const shown = useMemo(() => articles.filter((a) =>
@@ -525,7 +544,13 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
       onClick={(e) => e.target === e.currentTarget && onClose()}
       style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(4,10,8,0.72)", backdropFilter: "blur(6px)", display: "flex" }}
     >
-      <div style={{ width: "100%", maxWidth: 1080, margin: "auto", maxHeight: "100%", display: "flex", flexDirection: "column", background: C.panel, border: `1px solid ${C.line}`, borderRadius: 18, overflow: "hidden" }}>
+      <div style={{
+        width: "100%", maxWidth: narrow ? "100%" : 1080, margin: narrow ? 0 : "auto",
+        height: narrow ? "100%" : undefined, maxHeight: "100%",
+        display: "flex", flexDirection: "column", background: C.panel,
+        border: narrow ? "none" : `1px solid ${C.line}`,
+        borderRadius: narrow ? 0 : 18, overflow: "hidden",
+      }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderBottom: `1px solid ${C.line}`, flexShrink: 0 }}>
           <div style={{ width: 44, height: 44, borderRadius: 11, border: `1.5px solid ${C.brass}`, display: "grid", placeItems: "center", fontFamily: MONO, fontWeight: 700, color: C.brass, fontSize: 16, flexShrink: 0 }}>
             {table.label}
@@ -545,8 +570,12 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
           <Btn variant="bare" icon={X} onClick={onClose} />
         </div>
 
-        <div style={{ display: "flex", flex: 1, minHeight: 0, flexWrap: "wrap" }}>
-          <div style={{ flex: "1 1 340px", minWidth: 280, display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative", flexWrap: narrow ? "nowrap" : "wrap" }}>
+          <div style={{
+            flex: "1 1 340px", minWidth: narrow ? 0 : 280,
+            display: narrow && showBill ? "none" : "flex",
+            flexDirection: "column", minHeight: 0,
+          }}>
             <div style={{ padding: "12px 16px 8px" }}>
               <div style={{ position: "relative" }}>
                 <Search size={14} color={C.sageDim} style={{ position: "absolute", left: 11, top: 11 }} />
@@ -563,7 +592,12 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
                 }}>{c}</button>
               ))}
             </div>
-            <div style={{ flex: 1, overflowY: "auto", padding: "0 16px 16px", display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(132px,1fr))", gap: 8, alignContent: "start" }}>
+            <div style={{
+              flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch",
+              padding: narrow ? "0 16px 96px" : "0 16px 16px",
+              display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(132px,1fr))",
+              gap: 8, alignContent: "start",
+            }}>
               {shown.map((a) => (
                 <button key={a.id} onClick={() => add(a)} style={{
                   textAlign: "left", background: C.raise, border: `1px solid ${C.line}`, borderRadius: 11,
@@ -577,8 +611,50 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
             </div>
           </div>
 
-          <div style={{ flex: "1 1 320px", minWidth: 288, background: C.cream, display: "flex", flexDirection: "column", minHeight: 0 }}>
+          {narrow && !showBill && (
+            <div style={{
+              position: "absolute", left: 0, right: 0, bottom: 0,
+              background: C.cream, borderTop: "1px solid rgba(0,0,0,0.2)",
+              padding: "10px 14px calc(10px + env(safe-area-inset-bottom))",
+              display: "flex", alignItems: "center", gap: 12,
+              boxShadow: "0 -8px 24px rgba(0,0,0,0.35)",
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: "0.16em", color: "#8A7F66" }}>
+                  {lines.reduce((a, l) => a + l.qty, 0)} ITEMS
+                </div>
+                <div style={{ fontFamily: MONO, fontSize: 22, fontWeight: 700, color: "#1A1608", lineHeight: 1.15 }}>
+                  {money(total, venue.currency)}
+                </div>
+              </div>
+              <Btn
+                variant="solid" size="lg" icon={Receipt}
+                onClick={() => setShowBill(true)}
+                style={{ flexShrink: 0 }}
+              >
+                Bill
+              </Btn>
+            </div>
+          )}
+
+          <div style={{
+            flex: "1 1 320px", minWidth: narrow ? 0 : 288, background: C.cream,
+            display: narrow && !showBill ? "none" : "flex",
+            flexDirection: "column", minHeight: 0,
+          }}>
             <div style={{ height: 10, background: `repeating-linear-gradient(90deg, ${C.cream} 0 8px, rgba(0,0,0,0.12) 8px 12px)`, flexShrink: 0 }} />
+            {narrow && (
+              <button
+                onClick={() => { setShowBill(false); setPaying(false); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 7, margin: "10px 14px 0",
+                  background: "transparent", border: "none", cursor: "pointer",
+                  color: "#6B6250", fontFamily: SANS, fontSize: 13, fontWeight: 600, padding: 0,
+                }}
+              >
+                <ArrowLeft size={15} /> Back to the menu
+              </button>
+            )}
             <div style={{ padding: "14px 18px 6px", flexShrink: 0 }}>
               <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: "0.2em", color: "#8A7F66" }}>{venue.name.toUpperCase()}</div>
               <div style={{ fontFamily: MONO, fontSize: 11, color: "#8A7F66", marginTop: 2 }}>TABLE {table.label} · {guests} GUESTS · {actorName.toUpperCase()}</div>
@@ -598,7 +674,7 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
               ))}
             </div>
 
-            <div style={{ padding: "10px 18px 16px", borderTop: "1px solid rgba(0,0,0,0.15)", flexShrink: 0 }}>
+            <div style={{ padding: "10px 18px calc(16px + env(safe-area-inset-bottom))", borderTop: "1px solid rgba(0,0,0,0.15)", flexShrink: 0 }}>
               {discount > 0 && (
                 <div style={{ display: "flex", justifyContent: "space-between", fontFamily: MONO, fontSize: 12, color: "#6B6250" }}>
                   <span>DISCOUNT {discount}%</span><span>-{money(disc, venue.currency)}</span>
@@ -1403,6 +1479,61 @@ function PlatformForm({ onSubmit, error, busy }) {
 
 /* ------------------------------------------------------------- small screens */
 
+/* Android hands us a real install prompt. iOS never does, so it gets told
+   where the button is instead. Either way this only shows in a browser tab —
+   once installed, display-mode is standalone and it disappears. */
+function useInstallPrompt() {
+  const [deferred, setDeferred] = useState(null);
+  const [show, setShow] = useState(false);
+
+  useEffect(() => {
+    const standalone =
+      window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
+    if (standalone || sessionStorage.getItem("backbar.install.dismissed")) return;
+
+    const onPrompt = (e) => { e.preventDefault(); setDeferred(e); setShow(true); };
+    window.addEventListener("beforeinstallprompt", onPrompt);
+
+    const iOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    if (iOS) setShow(true);
+
+    return () => window.removeEventListener("beforeinstallprompt", onPrompt);
+  }, []);
+
+  const install = async () => {
+    if (!deferred) return false;
+    deferred.prompt();
+    await deferred.userChoice;
+    setDeferred(null);
+    setShow(false);
+    return true;
+  };
+  const dismiss = () => {
+    sessionStorage.setItem("backbar.install.dismissed", "1");
+    setShow(false);
+  };
+  return { show, canPrompt: !!deferred, install, dismiss };
+}
+
+function InstallBar({ prompt }) {
+  if (!prompt.show) return null;
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 12, padding: "10px 16px",
+      background: "rgba(230,180,80,0.08)", borderBottom: `1px solid ${C.brassDim}`, flexWrap: "wrap",
+    }}>
+      <Download size={15} color={C.brass} />
+      <span style={{ fontSize: 12.5, color: C.brass, flex: 1, minWidth: 180 }}>
+        {prompt.canPrompt
+          ? "Install Backbar for full screen and offline service."
+          : "Add to Home Screen from the Share menu for full screen and offline service."}
+      </span>
+      {prompt.canPrompt && <Btn size="sm" variant="solid" onClick={prompt.install}>Install</Btn>}
+      <Btn size="sm" variant="bare" icon={X} onClick={prompt.dismiss} />
+    </div>
+  );
+}
+
 function Splash({ text = "Opening the floor…" }) {
   return (
     <div style={{ minHeight: "100vh", background: C.ink, display: "grid", placeItems: "center", padding: 24 }}>
@@ -1440,6 +1571,7 @@ export default function App() {
   const [sheetBusy, setSheetBusy] = useState(false);
   const [toast, setToast] = useState(null);
   const now = useNow(20000);
+  const installPrompt = useInstallPrompt();
 
   const flash = useCallback((msg) => {
     setToast(msg);
@@ -1472,9 +1604,10 @@ export default function App() {
   }), [session]);
 
   /* ---- the bar's live data ---- */
-  const { data, loading, error: dataError, refresh, mutate, clearError } = useBarData(
-    session && session.role !== "platform" ? session : null
-  );
+  const {
+    data, loading, error: dataError, refresh, write, sync, clearError,
+    online, syncing, pendingCount,
+  } = useBarData(session && session.role !== "platform" ? session : null);
   const client = useMemo(() => (session ? clientFor(session) : null), [session]);
 
   const venue = data?.venue || null;
@@ -1549,22 +1682,34 @@ export default function App() {
     deleteZone: (id) => guard((c) => api.deleteZone(c, id)),
     saveArticle: (a) => guard((c) => api.upsertArticle(c, venue.id, a), "Price list updated"),
     removeArticle: (id) => guard((c) => api.deleteArticle(c, id), "Article removed"),
-    saveStaff: (s) => guard((c) => api.upsertStaff(c, venue.id, s), "Team updated"),
+    saveStaff: (s2) => guard((c) => api.upsertStaff(c, venue.id, s2), "Team updated"),
     removeStaff: (id) => guard((c) => api.deactivateStaff(c, id)),
     setDiscountPolicy: (v) => guard((c) => api.setDiscountPolicy(c, venue.id, v)),
   }), [guard, client, venue, flash]);
 
-  /* ---- orders ---- */
+  /* ---- orders: these are the writes that must survive a dead connection ---- */
+
   const commitOrder = async (lines, guests) => {
     setSheetBusy(true);
+    const orderId = openOrder?.id || crypto.randomUUID();
+    const payload = {
+      orderId, barId: venue.id, tableId: table.id, tableLabel: table.label,
+      guests, lines, staffId: openOrder?.staffId || session.actorId,
+      staffName: openOrder?.staffName || session.actorName,
+      openedAt: openOrder?.openedAt || Date.now(),
+    };
     try {
-      await api.saveOrder(client, {
-        orderId: openOrder?.id, barId: venue.id, table, guests, lines,
-        staff: { id: session.actorId, name: session.actorName },
-      });
-      await refresh();
+      const res = await write("order.save", payload, (c) =>
+        api.saveOrder(c, {
+          orderId, barId: venue.id, table, guests, lines,
+          staff: { id: payload.staffId, name: payload.staffName },
+          openedAt: payload.openedAt,
+        })
+      );
       setOpenTableId(null);
-      flash(`Table ${table.label} saved`);
+      flash(res === "queued"
+        ? `Table ${table.label} saved on this device — will sync`
+        : `Table ${table.label} saved`);
     } catch (e) { flash(e.message); }
     finally { setSheetBusy(false); }
   };
@@ -1572,13 +1717,19 @@ export default function App() {
   const settleOrder = async (method, paid, discount) => {
     if (!openOrder) return flash("Save the order before closing it.");
     setSheetBusy(true);
+    const billId = crypto.randomUUID();
+    const total = round2(openOrder.lines.reduce((a, l) => a + l.price * l.qty, 0) * (1 - (discount || 0) / 100));
     try {
-      const bill = await api.closeBill(client, { orderId: openOrder.id, method, paid, discount });
-      await refresh();
+      const res = await write(
+        "order.close",
+        { orderId: openOrder.id, billId, method, paid, discount },
+        (c) => api.closeBill(c, { orderId: openOrder.id, billId, method, paid, discount })
+      );
       setOpenTableId(null);
+      const tail = res === "queued" ? " (will sync)" : "";
       flash(paid
-        ? `Table ${table.label} paid — ${money(bill.total, venue.currency)}`
-        : `Table ${table.label} closed unpaid — sent to the owner`);
+        ? `Table ${table.label} paid — ${money(total, venue.currency)}${tail}`
+        : `Table ${table.label} closed unpaid${tail}`);
     } catch (e) { flash(e.message); }
     finally { setSheetBusy(false); }
   };
@@ -1703,7 +1854,7 @@ export default function App() {
 
   if (!isPlatform && loading && !data) return <Splash />;
 
-  if (!isPlatform && dataError && !data) {
+  if (!isPlatform && dataError && !data && online) {
     return (
       <Blocked
         message={dataError}
@@ -1737,6 +1888,8 @@ export default function App() {
         .animate-spin{animation:spin 1s linear infinite}
         @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
       `}</style>
+
+      <InstallBar prompt={installPrompt} />
 
       {session.support && (
         <div style={{ background: "rgba(230,180,80,0.12)", borderBottom: `1px solid ${C.brassDim}`, padding: "8px 18px", display: "flex", alignItems: "center", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
@@ -1778,6 +1931,23 @@ export default function App() {
             </div>
           )}
 
+          {!isPlatform && !online && (
+            <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 12px", borderRadius: 99, border: "1px solid rgba(212,103,74,0.45)", background: "rgba(212,103,74,0.1)" }}>
+              <WifiOff size={13} color={C.copper} />
+              <span style={{ fontSize: 12, color: C.copper, fontWeight: 600 }}>Offline</span>
+            </div>
+          )}
+          {!isPlatform && pendingCount > 0 && (
+            <button onClick={sync} title="Send now" style={{
+              display: "flex", alignItems: "center", gap: 7, padding: "6px 12px", borderRadius: 99,
+              border: `1px solid ${C.brassDim}`, background: "rgba(230,180,80,0.07)", cursor: "pointer",
+            }}>
+              <RefreshCw size={13} color={C.brass} className={syncing ? "animate-spin" : ""} />
+              <span style={{ fontFamily: MONO, fontSize: 12, color: C.brass }}>
+                {pendingCount} to sync
+              </span>
+            </button>
+          )}
           {!isPlatform && loading && <Loader2 size={14} color={C.sageDim} className="animate-spin" />}
 
           <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "5px 6px 5px 11px", borderRadius: 10, background: C.raise, border: `1px solid ${C.line}` }}>
@@ -1870,6 +2040,11 @@ export default function App() {
                         <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim, marginTop: 3 }}>
                           {o.lines.reduce((s, l) => s + l.qty, 0)} items · {o.guests} guests · {mine ? "you" : o.staffName}
                         </div>
+                        {o.pending && (
+                          <div style={{ fontFamily: SANS, fontSize: 10.5, color: C.brass, marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
+                            <RefreshCw size={10} /> saved on this device
+                          </div>
+                        )}
                       </button>
                     );
                   })}

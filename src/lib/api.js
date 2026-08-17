@@ -44,59 +44,40 @@ export async function loadBar(client, barId) {
 
 /* ------------------------------------------------------------------- orders */
 
-/** Open a table, or add to one that's already open. Prices come from the
-    server, so we only ever send article ids and quantities. */
-export async function saveOrder(client, { orderId, barId, table, guests, lines, staff }) {
-  let id = orderId;
+/** Open a table, or add to one that's already open.
 
-  if (!id) {
-    const row = unwrap(
-      await client
-        .from("orders")
-        .insert({
-          bar_id: barId,
-          table_id: table.id,
-          table_label: table.label,
-          guests,
-          staff_id: staff.id,
-          staff_name: staff.name,
-        })
-        .select()
-        .single()
-    );
-    id = row.id;
-  } else {
-    unwrap(await client.from("orders").update({ guests }).eq("id", id));
-  }
-
-  // Simplest correct approach: replace the lines wholesale. Bars are small and
-  // this sidesteps a pile of diffing bugs when two waiters touch one table.
-  unwrap(await client.from("order_lines").delete().eq("order_id", id));
-
-  if (lines.length) {
-    unwrap(
-      await client.from("order_lines").insert(
-        lines.map((l) => ({
-          order_id: id,
-          article_id: l.articleId,
-          qty: l.qty,
-          name: l.name,       // overwritten server-side by the price trigger
-          unit_price: 0,      // ditto — the client cannot set a price
-          unit_cost: 0,
-        }))
-      )
-    );
-  }
+    The order id is generated HERE, not by the database. That's what lets an
+    offline tablet queue the write and replay it later without creating a
+    duplicate — the same id lands on the same row. Prices are still decided
+    server-side, so we send article ids and quantities only. */
+export async function saveOrder(client, { orderId, barId, table, guests, lines, staff, openedAt }) {
+  const id = orderId || crypto.randomUUID();
+  unwrap(
+    await client.rpc("save_order_full", {
+      p_order: id,
+      p_bar: barId,
+      p_table: table.id,
+      p_label: table.label,
+      p_guests: guests,
+      p_staff: staff.id,
+      p_staff_name: staff.name,
+      p_opened_at: new Date(openedAt || Date.now()).toISOString(),
+      p_lines: lines.map((l) => ({ article_id: l.articleId, qty: l.qty })),
+    })
+  );
   return id;
 }
 
 export async function cancelOrder(client, orderId) {
-  unwrap(await client.from("orders").delete().eq("id", orderId));
+  unwrap(await client.rpc("cancel_order", { p_order: orderId }));
 }
 
 /** Close a bill. Totals, discount limits and the paid flag are all decided
     in the database — see close_order_and_bill in rpc.sql. */
-export async function closeBill(client, { orderId, method, paid, discount = 0 }) {
+/** Close a bill. The bill id is generated here for the same reason as the
+    order id: a replayed close must return the existing bill rather than
+    billing the table twice. */
+export async function closeBill(client, { orderId, billId, method, paid, discount = 0 }) {
   return mapBill(
     unwrap(
       await client.rpc("close_order_and_bill", {
@@ -104,10 +85,30 @@ export async function closeBill(client, { orderId, method, paid, discount = 0 })
         p_method: paid ? method : null,
         p_paid: paid,
         p_discount: discount,
+        p_bill: billId || crypto.randomUUID(),
       })
     )
   );
 }
+
+/* The outbox replays through these, so their shape must match what
+   src/lib/sync.js stores. Keeping them here keeps the two in step. */
+export const outboxHandlers = {
+  "order.save": (client, p) =>
+    saveOrder(client, {
+      orderId: p.orderId, barId: p.barId,
+      table: { id: p.tableId, label: p.tableLabel },
+      guests: p.guests, lines: p.lines,
+      staff: { id: p.staffId, name: p.staffName },
+      openedAt: p.openedAt,
+    }),
+  "order.close": (client, p) =>
+    closeBill(client, {
+      orderId: p.orderId, billId: p.billId,
+      method: p.method, paid: p.paid, discount: p.discount,
+    }),
+  "order.cancel": (client, p) => cancelOrder(client, p.orderId),
+};
 
 /** Owner settling something a waiter marked unpaid. */
 export async function settleBill(client, billId, method) {

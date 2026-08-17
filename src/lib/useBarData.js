@@ -1,55 +1,85 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { clientFor } from "./auth";
-import { loadBar } from "./api";
+import { loadBar, outboxHandlers } from "./api";
+import { saveSnapshot, loadSnapshot, enqueue, peekOutbox, applyOutbox } from "./db";
+import { drainOutbox, watchConnection } from "./sync";
 
 /* ===========================================================================
-   useBarData — the floor, live.
-   ---------------------------------------------------------------------------
-   When a waiter adds a round on their phone, the table lights up on the
-   tablet behind the bar about a second later. That's the whole point of
-   putting this on a server, and it's why the app stops being four separate
-   copies of the truth.
+   useBarData — the floor, live and offline-tolerant.
 
-   Realtime tells us *that* something changed, not what the new totals are.
-   Rather than trying to patch state from the payload, we refetch the snapshot
-   — it's one cheap call and it can't drift out of sync.
+   Online: realtime says something changed, we refetch the snapshot.
+   Offline: the cached snapshot renders, writes queue, and the queue drains
+   when the connection comes back.
+
+   What the UI renders is always the snapshot with pending writes folded on
+   top, so a table the waiter just saved looks occupied immediately whether or
+   not the server has heard about it yet.
    =========================================================================== */
 
 export function useBarData(session) {
-  const [data, setData] = useState(null);
+  const [server, setServer] = useState(null);   // last known server state
+  const [pending, setPending] = useState([]);   // outbox, for optimistic display
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const refetchTimer = useRef(null);
+  const [online, setOnline] = useState(() =>
+    typeof navigator === "undefined" ? true : navigator.onLine);
+  const [syncing, setSyncing] = useState(false);
+  const [fromCache, setFromCache] = useState(false);
 
+  const refetchTimer = useRef(null);
   const barId = session?.barId;
-  const client = session ? clientFor(session) : null;
-  const clientRef = useRef(client);
-  clientRef.current = client;
+  const clientRef = useRef(null);
+  clientRef.current = session ? clientFor(session) : null;
+
+  const refreshPending = useCallback(async () => {
+    setPending(await peekOutbox());
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!clientRef.current || !barId) return;
     try {
-      setData(await loadBar(clientRef.current, barId));
+      const fresh = await loadBar(clientRef.current, barId);
+      setServer(fresh);
+      setFromCache(false);
       setError(null);
+      saveSnapshot(barId, fresh);
     } catch (e) {
-      setError(e.message);
+      // Failing to fetch while offline isn't worth showing — the cache is
+      // doing its job. Failing while online is.
+      if (navigator.onLine) setError(e.message);
     } finally {
       setLoading(false);
     }
   }, [barId]);
 
-  // A busy bar can fire a dozen changes a second. Coalesce them.
   const scheduleRefresh = useCallback(() => {
     clearTimeout(refetchTimer.current);
     refetchTimer.current = setTimeout(refresh, 250);
   }, [refresh]);
 
+  /* boot: cache first so the room appears instantly, then the network */
   useEffect(() => {
+    if (!barId) return;
+    let alive = true;
+    setLoading(true);
+    (async () => {
+      const cached = await loadSnapshot(barId);
+      if (alive && cached) {
+        setServer(cached);
+        setFromCache(true);
+        setLoading(false);
+      }
+      await refreshPending();
+      if (alive) refresh();
+    })();
+    return () => { alive = false; };
+  }, [barId, refresh, refreshPending]);
+
+  /* realtime */
+  useEffect(() => {
+    const client = clientRef.current;
     if (!barId || !client) return;
     let alive = true;
-
-    setLoading(true);
-    refresh();
 
     const channel = client
       .channel(`bar:${barId}`)
@@ -64,39 +94,81 @@ export function useBarData(session) {
         () => alive && scheduleRefresh())
       .subscribe();
 
-    // Tablets sleep. Coming back to a stale floor is worse than a brief spinner.
-    const onWake = () => document.visibilityState === "visible" && scheduleRefresh();
-    document.addEventListener("visibilitychange", onWake);
-    window.addEventListener("online", scheduleRefresh);
-
     return () => {
       alive = false;
       clearTimeout(refetchTimer.current);
-      document.removeEventListener("visibilitychange", onWake);
-      window.removeEventListener("online", scheduleRefresh);
       client.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [barId, session?.token]);
 
-  /* Wrap a mutation so the UI updates immediately and rolls back if the server
-     says no. Without this, every tap waits on a round trip — unacceptable when
-     someone is standing at the table waiting to order. */
-  const mutate = useCallback(
-    async (fn, optimistic) => {
-      const previous = data;
-      if (optimistic) setData(optimistic(data));
-      try {
-        await fn(clientRef.current);
-        scheduleRefresh();
-      } catch (e) {
-        setData(previous);
-        setError(e.message);
-        throw e;
-      }
-    },
-    [data, scheduleRefresh]
-  );
+  /* sync */
+  const sync = useCallback(async () => {
+    const client = clientRef.current;
+    if (!client || !navigator.onLine) return;
+    setSyncing(true);
+    try {
+      const { sent } = await drainOutbox(client, outboxHandlers, refreshPending);
+      await refreshPending();
+      if (sent > 0) await refresh();
+    } finally {
+      setSyncing(false);
+    }
+  }, [refresh, refreshPending]);
 
-  return { data, loading, error, refresh, mutate, clearError: () => setError(null) };
+  useEffect(() => {
+    if (!barId) return;
+    const goOnline = () => { setOnline(true); sync(); };
+    const goOffline = () => setOnline(false);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    const stop = watchConnection(() => sync());
+    sync(); // anything left over from last session goes out now
+    return () => {
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+      stop();
+    };
+  }, [barId, sync]);
+
+  /* write — online it hits the server, offline it queues. Either way the
+     waiter's tap works and the screen moves. */
+  const write = useCallback(async (op, payload, direct) => {
+    const client = clientRef.current;
+
+    if (client && navigator.onLine) {
+      try {
+        await direct(client);
+        await refresh();
+        return true;
+      } catch (e) {
+        // If the network dropped between the check and the call, fall through
+        // to the queue rather than losing the round.
+        const networkish = e?.name === "TypeError" ||
+          /failed to fetch|networkerror|load failed/i.test(e?.message || "");
+        if (!networkish) throw e;
+      }
+    }
+
+    const queued = await enqueue(op, payload);
+    if (!queued) throw new Error("This device can't save offline. Check storage settings.");
+    await refreshPending();
+    return "queued";
+  }, [refresh, refreshPending]);
+
+  const data = applyOutbox(server, pending);
+
+  return {
+    data,
+    loading: loading && !data,
+    error,
+    online,
+    syncing,
+    fromCache,
+    pendingCount: pending.length,
+    refresh,
+    write,
+    sync,
+    clearError: () => setError(null),
+  };
 }
