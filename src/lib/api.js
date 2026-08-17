@@ -163,6 +163,24 @@ export async function loadFiscalProblems(client, barId) {
 
 /** Reset a bar owner's PIN. Platform only. The returned PIN is the one moment
     it is ever readable — afterwards it exists only as a bcrypt hash. */
+/** What deleting this bar would destroy. Shown before the confirmation. */
+export async function barDeletePreview(barId) {
+  return unwrap(await supabase.rpc("bar_delete_preview", { p_bar: barId }));
+}
+
+/** Permanent. `confirm` must equal the bar's name exactly. */
+export async function deleteBar(barId, confirm, logoPath) {
+  if (logoPath) await supabase.storage.from("logos").remove([logoPath]).catch(() => {});
+  return unwrap(await supabase.rpc("delete_bar", { p_bar: barId, p_confirm: confirm }));
+}
+
+/** Every product sold in the period — not just the top few. */
+export async function loadProductsSold(client, barId, from, to) {
+  return unwrap(await client.rpc("bar_products_sold", {
+    p_bar: barId, p_from: from, p_to: to,
+  }));
+}
+
 export async function resetOwnerPin(barId, pin) {
   return unwrap(await supabase.rpc("reset_owner_pin", { p_bar: barId, p_pin: pin || null }));
 }
@@ -348,7 +366,9 @@ function mapBar(b) {
     address: b.address,
     currency: b.currency,
     code: b.bar_code,
-    ownerName: (b.staff || []).find((s) => s.role === "owner")?.name ?? "Owner",
+    ownerName: b.owner_name
+      || (b.staff || []).find((s) => s.role === "owner")?.name
+      || "Owner",
     staff: (b.staff || []).filter((s) => s.role === "waiter" && s.active),
     allowStaffDiscount: b.allow_staff_discount,
     brandAccent: b.brand_accent,

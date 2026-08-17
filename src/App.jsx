@@ -1207,7 +1207,7 @@ function SplitList({ rows, cur, nameKey = "name", valueKey = "gross", sub }) {
   );
 }
 
-function Reports({ venue, report, loading, mode, setMode, anchor, setAnchor, unpaid, onSettleUnpaid, onExport, exporting }) {
+function Reports({ venue, report, products, productsLoading, loading, mode, setMode, anchor, setAnchor, unpaid, onSettleUnpaid, onExport, exporting }) {
   const cur = venue.currency;
   const t = report?.totals || {};
   const prev = report?.previous || {};
@@ -1349,33 +1349,7 @@ function Reports({ venue, report, loading, mode, setMode, anchor, setAnchor, unp
         </Panel>
       </div>
 
-      {/* best earners */}
-      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, marginTop: 16, overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 48px 82px 82px", gap: 8, padding: "11px 16px", background: C.raise, borderBottom: `1px solid ${C.line}` }}>
-          <Eyebrow>Best earners</Eyebrow>
-          <Eyebrow style={{ textAlign: "right" }}>Qty</Eyebrow>
-          <Eyebrow style={{ textAlign: "right" }}>Sold</Eyebrow>
-          <Eyebrow style={{ textAlign: "right" }}>Profit</Eyebrow>
-        </div>
-        <div style={{ maxHeight: 380, overflowY: "auto" }}>
-          {(report?.topItems || []).map((a, i) => (
-            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 48px 82px 82px", gap: 8, padding: "10px 16px", borderBottom: `1px solid ${C.lineFade}`, alignItems: "center" }}>
-              <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                <span style={{ fontFamily: SANS, fontSize: 13, color: C.cream }}>{a.name}</span>
-                <span style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim, marginLeft: 8 }}>{a.category}</span>
-              </div>
-              <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.sage, textAlign: "right" }}>{a.qty}</span>
-              <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.creamDim, textAlign: "right" }}>{money(Number(a.gross) || 0, cur)}</span>
-              <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.brass, textAlign: "right" }}>{money(Number(a.profit) || 0, cur)}</span>
-            </div>
-          ))}
-          {!(report?.topItems || []).length && (
-            <div style={{ padding: 20, fontFamily: SANS, fontSize: 13, color: C.sageDim }}>
-              Close a bill and it will show up here.
-            </div>
-          )}
-        </div>
-      </div>
+      <ProductsSold rows={products} loading={productsLoading} cur={cur} />
 
       <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim, marginTop: 14, lineHeight: 1.5 }}>
         A day runs from {String(report?.cutoffHour ?? 5).padStart(2, "0")}:00 to
@@ -1386,11 +1360,127 @@ function Reports({ venue, report, loading, mode, setMode, anchor, setAnchor, unp
   );
 }
 
+/* What sold, how much of it, and what it earned. Sortable because an owner
+   asks different questions on different days — what moves, and what pays. */
+function ProductsSold({ rows, loading, cur }) {
+  const [sort, setSort] = useState("gross");
+  const [dir, setDir] = useState(-1);
+  const [q, setQ] = useState("");
+
+  const shown = useMemo(() => {
+    const f = q
+      ? rows.filter((r) => (r.name + " " + r.category).toLowerCase().includes(q.toLowerCase()))
+      : rows;
+    return [...f].sort((a, b) => {
+      const va = sort === "name" ? a.name : Number(a[sort]) || 0;
+      const vb = sort === "name" ? b.name : Number(b[sort]) || 0;
+      if (typeof va === "string") return dir * va.localeCompare(vb);
+      return dir * (va - vb);
+    });
+  }, [rows, sort, dir, q]);
+
+  const totals = shown.reduce((t, r) => ({
+    qty: t.qty + Number(r.qty || 0),
+    gross: t.gross + Number(r.gross || 0),
+    profit: t.profit + Number(r.profit || 0),
+  }), { qty: 0, gross: 0, profit: 0 });
+
+  const GRID = "minmax(0,1fr) 62px 92px 92px 62px";
+  const head = (key, label, align = "right") => (
+    <button onClick={() => { setDir(sort === key ? -dir : -1); setSort(key); }} style={{
+      background: "transparent", border: "none", cursor: "pointer", padding: 0,
+      textAlign: align, fontFamily: SANS, fontSize: 10, fontWeight: 700,
+      letterSpacing: "0.16em", textTransform: "uppercase",
+      color: sort === key ? C.brass : C.sageDim,
+    }}>
+      {label}{sort === key ? (dir === -1 ? " ↓" : " ↑") : ""}
+    </button>
+  );
+
+  return (
+    <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, marginTop: 16, overflow: "hidden" }}>
+      <div style={{ padding: "14px 18px", borderBottom: `1px solid ${C.line}`, display: "flex",
+        alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <Eyebrow>Sold in this period</Eyebrow>
+        {loading && <Loader2 size={13} color={C.sageDim} className="animate-spin" />}
+        <div style={{ position: "relative", marginLeft: "auto", minWidth: 160 }}>
+          <Search size={13} color={C.sageDim} style={{ position: "absolute", left: 10, top: 9 }} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a product"
+            style={{ width: "100%", background: C.ink, border: `1px solid ${C.line}`, borderRadius: 8,
+              padding: "7px 10px 7px 30px", color: C.cream, fontFamily: SANS, fontSize: 12.5, outline: "none" }} />
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: GRID, gap: 14, padding: "10px 18px",
+        background: C.raise, borderBottom: `1px solid ${C.line}` }}>
+        {head("name", "Product", "left")}
+        {head("qty", "Sold")}
+        {head("gross", "Money")}
+        {head("profit", "Profit")}
+        {head("margin", "Margin")}
+      </div>
+
+      <div style={{ maxHeight: 460, overflowY: "auto" }}>
+        {shown.map((r, i) => (
+          <div key={i} style={{ display: "grid", gridTemplateColumns: GRID, gap: 14,
+            padding: "11px 18px", borderBottom: `1px solid ${C.lineFade}`, alignItems: "center" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: SANS, fontSize: 13.5, color: C.cream, overflow: "hidden",
+                textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</div>
+              <div style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim, marginTop: 2 }}>
+                {r.category} · {Number(r.share || 0).toFixed(1)}% of takings
+              </div>
+            </div>
+            <span style={{ fontFamily: MONO, fontSize: 14, color: C.cream, textAlign: "right" }}>{r.qty}</span>
+            <span style={{ fontFamily: MONO, fontSize: 13, color: C.creamDim, textAlign: "right" }}>
+              {money(Number(r.gross) || 0, cur)}
+            </span>
+            <span style={{ fontFamily: MONO, fontSize: 13, textAlign: "right",
+              color: Number(r.cost) > 0 ? C.brass : C.sageDim }}>
+              {Number(r.cost) > 0 ? money(Number(r.profit) || 0, cur) : "—"}
+            </span>
+            <span style={{ fontFamily: MONO, fontSize: 12, textAlign: "right",
+              color: Number(r.cost) > 0 ? C.sage : C.sageDim }}>
+              {Number(r.cost) > 0 ? `${Number(r.margin || 0).toFixed(0)}%` : "—"}
+            </span>
+          </div>
+        ))}
+        {!shown.length && !loading && (
+          <div style={{ padding: 22, fontFamily: SANS, fontSize: 13, color: C.sageDim }}>
+            {q ? "Nothing matches that." : "Nothing sold in this period."}
+          </div>
+        )}
+      </div>
+
+      {shown.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: GRID, gap: 14, padding: "12px 18px",
+          background: C.raise, borderTop: `1px solid ${C.line}` }}>
+          <span style={{ fontFamily: SANS, fontSize: 12, fontWeight: 700, color: C.sage }}>
+            {shown.length} product{shown.length > 1 ? "s" : ""}
+          </span>
+          <span style={{ fontFamily: MONO, fontSize: 13, color: C.cream, textAlign: "right" }}>{totals.qty}</span>
+          <span style={{ fontFamily: MONO, fontSize: 13, color: C.cream, textAlign: "right" }}>{money(totals.gross, cur)}</span>
+          <span style={{ fontFamily: MONO, fontSize: 13, color: C.brass, textAlign: "right" }}>{money(totals.profit, cur)}</span>
+          <span />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Panel({ title, children, flex }) {
   return (
     <div style={{ flex, minWidth: 240, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 18 }}>
       <Eyebrow>{title}</Eyebrow>
       {children}
+    </div>
+  );
+}
+
+function Row2({ a, b }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+      <span>{a}</span><span style={{ color: C.creamDim }}>{b}</span>
     </div>
   );
 }
@@ -1407,9 +1497,14 @@ function Notice({ tone, icon: Icon, children }) {
   );
 }
 
-function Team({ venue, staff, flash, actions }) {
+function Team({ venue, staff: allStaff, flash, actions }) {
   const [editing, setEditing] = useState(null);
   const [issued, setIssued] = useState(null);
+  const [deleting, setDeleting] = useState(null);   // { bar, preview }
+  const [confirmText, setConfirmText] = useState("");
+  // Never list the owner here — deleting that row would lock them out of
+  // their own bar. The database refuses it too, but it shouldn't be offered.
+  const staff = (allStaff || []).filter((s) => s.role !== "owner");
   const plan = PLANS[venue.subscription.plan];
 
   // The database rejects a PIN already used at this bar, so we don't duplicate
@@ -1443,7 +1538,9 @@ function Team({ venue, staff, flash, actions }) {
             <ShieldCheck size={15} color={C.brass} />
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: SANS, fontSize: 14, color: C.cream, fontWeight: 600 }}>{venue.ownerName}</div>
+            <div style={{ fontFamily: SANS, fontSize: 14, color: C.cream, fontWeight: 600 }}>
+              {venue.ownerName} <span style={{ color: C.sageDim, fontWeight: 400 }}>(you)</span>
+            </div>
             <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>Owner — sees money, floor plan and prices</div>
           </div>
           <span style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>PIN set at setup</span>
@@ -1660,6 +1757,8 @@ function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loadi
   const [detail, setDetail] = useState(null);
   const [adding, setAdding] = useState(null);
   const [issued, setIssued] = useState(null);
+  const [deleting, setDeleting] = useState(null);   // { bar, preview }
+  const [confirmText, setConfirmText] = useState("");
 
   const states = venues.map((v) => subState(v, now));
   const mrr = venues.reduce((s, v, i) => s + (canOperate(states[i]) ? v.subscription.price : 0), 0);
@@ -1818,6 +1917,17 @@ function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loadi
               {!v.subscription.payments.length && <div style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim }}>No payments recorded yet.</div>}
             </div>
 
+            <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 18, paddingTop: 14 }}>
+              <Eyebrow style={{ color: C.copper, marginBottom: 8 }}>Danger</Eyebrow>
+              <Btn variant="danger" icon={Trash2} style={{ width: "100%" }}
+                onClick={async () => {
+                  const preview = await actions.deletePreview(v);
+                  if (preview) { setDetail(null); setConfirmText(""); setDeleting({ bar: v, preview }); }
+                }}>
+                Delete this bar permanently
+              </Btn>
+            </div>
+
             <Btn variant="ghost" style={{ width: "100%", marginTop: 16 }} onClick={() => setDetail(null)}>Close</Btn>
           </Modal>
         );
@@ -1839,6 +1949,52 @@ function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loadi
             </div>
             <Btn variant="solid" style={{ width: "100%", marginTop: 18 }} onClick={() => setIssued(null)}>
               Done
+            </Btn>
+          </div>
+        </Modal>
+      )}
+
+      {deleting && (
+        <Modal onClose={() => setDeleting(null)} width={430}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+            <AlertTriangle size={20} color={C.copper} />
+            <span style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 17 }}>
+              Delete {deleting.bar.name}?
+            </span>
+          </div>
+          <div style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim, marginBottom: 14, lineHeight: 1.5 }}>
+            This cannot be undone. Suspending instead keeps everything and simply
+            stops them signing in.
+          </div>
+
+          <div style={{ background: C.ink, border: "1px solid rgba(212,103,74,0.3)", borderRadius: 11,
+            padding: 14, marginBottom: 14 }}>
+            <Eyebrow style={{ marginBottom: 8 }}>What gets destroyed</Eyebrow>
+            <div style={{ display: "grid", gap: 5, fontFamily: MONO, fontSize: 12.5, color: C.sage }}>
+              <Row2 a={`${deleting.preview.bills} bills`}
+                    b={money(Number(deleting.preview.takings) || 0, deleting.preview.currency)} />
+              <Row2 a={`${deleting.preview.articles} articles`} b={`${deleting.preview.tables} tables`} />
+              <Row2 a={`${deleting.preview.staff} people`} b={`${deleting.preview.openOrders} tables open now`} />
+              {deleting.preview.fiscalReceipts > 0 && (
+                <div style={{ color: C.copper, fontFamily: SANS, fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>
+                  {deleting.preview.fiscalReceipts} of these bills carry a fiscal receipt number.
+                  Fiscal records have a retention period — export them before deleting.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <Field label={`Type ${deleting.bar.name} to confirm`} value={confirmText} onChange={setConfirmText} />
+
+          <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+            <Btn variant="ghost" style={{ flex: 1 }} onClick={() => setDeleting(null)}>Keep it</Btn>
+            <Btn variant="danger" icon={Trash2} style={{ flex: 1 }}
+              disabled={confirmText !== deleting.bar.name}
+              onClick={async () => {
+                const done = await actions.deleteBar(deleting.bar, confirmText);
+                if (done) setDeleting(null);
+              }}>
+              Delete for good
             </Btn>
           </div>
         </Modal>
@@ -2249,22 +2405,26 @@ export default function App() {
   const [report, setReport] = useState(null);
   const [unpaid, setUnpaid] = useState([]);
   const [reportLoading, setReportLoading] = useState(false);
+  const [products, setProducts] = useState([]);
+  const [productsLoading, setProductsLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   const range = useMemo(() => periodRange(mode, anchor), [mode, anchor]);
 
   const loadReports = useCallback(async () => {
     if (!client || !venue || session?.role !== "owner") return;
-    setReportLoading(true);
+    setReportLoading(true); setProductsLoading(true);
     try {
-      const [rep, un] = await Promise.all([
+      const [rep, un, prod] = await Promise.all([
         api.loadReport(client, venue.id, range.from, range.to, mode === "day" ? "hour" : "day"),
         api.loadUnpaidBills(client, venue.id),
+        api.loadProductsSold(client, venue.id, range.from, range.to),
       ]);
       setReport(rep);
       setUnpaid(un);
+      setProducts(prod || []);
     } catch (e) { flash(e.message); }
-    finally { setReportLoading(false); }
+    finally { setReportLoading(false); setProductsLoading(false); }
   }, [client, venue, session, range.from, range.to, mode, flash]);
 
   useEffect(() => {
@@ -2339,6 +2499,8 @@ export default function App() {
       })),
       recordPayment: (v) => run(() => api.recordPayment(v.id), `${v.name} marked paid`),
       resetOwnerPin: (v) => run(() => api.resetOwnerPin(v.id)),
+      deletePreview: (v) => api.barDeletePreview(v.id).catch((e) => { flash(e.message); return null; }),
+      deleteBar: (v, confirm) => run(() => api.deleteBar(v.id, confirm, v.logoPath), `${v.name} deleted`),
       toggleSuspend: (v) => run(
         () => api.setSuspended(v.id, !v.subscription.suspended),
         v.subscription.suspended ? `${v.name} reactivated` : `${v.name} suspended — nobody there can sign in`
@@ -2607,6 +2769,7 @@ export default function App() {
         {isOwner && currentTab === "reports" && (
           <Reports
             venue={venue} report={report} loading={reportLoading}
+            products={products} productsLoading={productsLoading}
             mode={mode} setMode={setMode} anchor={anchor} setAnchor={setAnchor}
             unpaid={unpaid} onSettleUnpaid={settleUnpaid}
             onExport={exportCsv} exporting={exporting}
