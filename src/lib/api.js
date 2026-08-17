@@ -150,6 +150,7 @@ export async function upsertArticle(client, barId, a) {
     category: a.category,
     cost_price: a.cost,
     sell_price: a.price,
+    vat_rate: a.vatRate ?? 18,
     active: a.active !== false,
   };
   const q = a.id
@@ -311,6 +312,7 @@ const mapArticle = (a) => ({
   category: a.category,
   price: num(a.sell_price),
   cost: num(a.cost_price) ?? 0, // null for waiters — the column isn't sent to them
+  vatRate: num(a.vat_rate) ?? 18,
   active: a.active,
 });
 
@@ -355,6 +357,10 @@ function mapBill(b) {
     profit: total - cost,
     staffId: b.staff_id,
     staffName: b.staff_name,
+    fiscalStatus: b.fiscal_status || "not_required",
+    fiscalReceiptNo: b.fiscal_receipt_no,
+    fiscalError: b.fiscal_error,
+    vatBreakdown: b.vat_breakdown || [],
     lines,
   };
 }

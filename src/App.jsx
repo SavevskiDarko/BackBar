@@ -62,6 +62,16 @@ export const CURRENCIES = {
   TRY: { label: "Lira", sign: "₺", after: false, decimals: 2 },
 };
 
+/* A bar carries three VAT rates at once. The rate belongs to the item, not the
+   category: cake eaten in is hospitality, the same cake boxed to go is not.
+   Classification is the accountant's call, not the app's. */
+const VAT_RATES = [
+  { rate: 18, label: "18% · alcohol" },
+  { rate: 10, label: "10% · hospitality" },
+  { rate: 5,  label: "5% · packaged to go" },
+  { rate: 0,  label: "0% · exempt" },
+];
+
 const curOf = (cur) =>
   CURRENCIES[String(cur || "EUR").toUpperCase()] ||
   { sign: cur || "€", after: false, decimals: 2 };
@@ -903,7 +913,7 @@ function PriceList({ articles, currency, actions }) {
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find an article"
             style={{ width: "100%", background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9, padding: "9px 12px 9px 32px", color: C.cream, fontFamily: SANS, fontSize: 13, outline: "none" }} />
         </div>
-        <Btn variant="solid" icon={Plus} onClick={() => setEditing({ id: null, name: "", category: cat === "All" ? "Beer" : cat, cost: 0, price: 0, active: true })}>New article</Btn>
+        <Btn variant="solid" icon={Plus} onClick={() => setEditing({ id: null, name: "", category: cat === "All" ? "Beer" : cat, cost: 0, price: 0, vatRate: 18, active: true })}>New article</Btn>
       </div>
 
       <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 12 }}>
@@ -921,6 +931,7 @@ function PriceList({ articles, currency, actions }) {
           <Eyebrow>Article</Eyebrow>
           <Eyebrow style={{ textAlign: "right" }}>Buy {curOf(currency).sign}</Eyebrow>
           <Eyebrow style={{ textAlign: "right" }}>Sell {curOf(currency).sign}</Eyebrow>
+          <Eyebrow style={{ textAlign: "right" }}>VAT</Eyebrow>
           <Eyebrow style={{ textAlign: "right" }}>Margin</Eyebrow>
           <span />
         </div>
@@ -928,13 +939,14 @@ function PriceList({ articles, currency, actions }) {
           {shown.map((a) => {
             const m = a.price ? (a.price - a.cost) / a.price : 0;
             return (
-              <div key={a.id} style={{ display: "grid", gridTemplateColumns: "1fr 82px 82px 76px 40px", gap: 8, padding: "11px 14px", borderBottom: `1px solid ${C.line}55`, alignItems: "center" }}>
+              <div key={a.id} style={{ display: "grid", gridTemplateColumns: "1fr 78px 78px 58px 68px 40px", gap: 8, padding: "11px 14px", borderBottom: `1px solid ${C.line}55`, alignItems: "center" }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontFamily: SANS, fontSize: 13.5, color: C.cream, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</div>
                   <div style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim }}>{a.category}</div>
                 </div>
                 <div style={{ fontFamily: MONO, fontSize: 13, color: C.sage, textAlign: "right" }}>{amount(a.cost, currency)}</div>
                 <div style={{ fontFamily: MONO, fontSize: 13, color: C.cream, textAlign: "right" }}>{amount(a.price, currency)}</div>
+                <div style={{ textAlign: "right", fontFamily: MONO, fontSize: 12, color: C.sage }}>{(a.vatRate ?? 18)}%</div>
                 <div style={{ textAlign: "right", fontFamily: MONO, fontSize: 12, color: m > 0.65 ? C.mint : m > 0.4 ? C.brass : C.copper }}>{(m * 100).toFixed(0)}%</div>
                 <button onClick={() => setEditing({ ...a })} style={{ background: "transparent", border: "none", color: C.sageDim, cursor: "pointer", justifySelf: "end" }}><ChevronRight size={16} /></button>
               </div>
@@ -1052,7 +1064,53 @@ function Reports({ bills: allBills, unpaid, orders, venue, range, setRange, load
         <Stat label="Average bill" value={money(avg, cur)} sub={`cash ${money(cash, cur)} · card ${money(revenue - cash, cur)}`} />
         <Stat label="Still open" value={money(openValue, cur)} accent={open.length ? C.mint : C.cream} sub={`${open.length} tables running`} />
         <Stat label="Unpaid" value={money(unpaidTotal, cur)} accent={unpaid.length ? C.copper : C.cream} sub={`${unpaid.length} bills on the tab`} />
+        {(() => {
+          const vat = {};
+          paidBills.forEach((b) => (b.vatBreakdown || []).forEach((v) => {
+            vat[v.rate] = (vat[v.rate] || 0) + Number(v.vat || 0);
+          }));
+          const totalVat = Object.values(vat).reduce((a, x) => a + x, 0);
+          if (!totalVat) return null;
+          return (
+            <Stat
+              label="VAT in these takings"
+              value={money(round2(totalVat), cur)}
+              sub={Object.entries(vat).sort((a, b) => b[0] - a[0])
+                .map(([r, v]) => `${r}%: ${money(round2(v), cur)}`).join(" · ")}
+            />
+          );
+        })()}
       </div>
+
+      {(() => {
+        const stuck = bills.filter((b) => b.paid && (b.fiscalStatus === "pending" || b.fiscalStatus === "failed"));
+        if (!stuck.length) return null;
+        return (
+          <div style={{ marginTop: 16, background: C.panel, border: "1px solid rgba(212,103,74,0.4)", borderRadius: 14, overflow: "hidden" }}>
+            <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <AlertTriangle size={14} color={C.copper} />
+              <Eyebrow style={{ color: C.copper }}>Paid but no fiscal receipt</Eyebrow>
+              <span style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim, marginLeft: "auto" }}>
+                {stuck.length} bill{stuck.length > 1 ? "s" : ""} · {money(round2(stuck.reduce((a, b) => a + b.total, 0)), cur)}
+              </span>
+            </div>
+            {stuck.slice(0, 8).map((b) => (
+              <div key={b.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", borderBottom: `1px solid ${C.line}55`, flexWrap: "wrap" }}>
+                <span style={{ fontFamily: MONO, fontWeight: 700, color: C.brass, width: 40 }}>{b.tableLabel}</span>
+                <span style={{ fontFamily: SANS, fontSize: 12, color: C.sage, flex: 1, minWidth: 140 }}>
+                  {new Date(b.closedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                  {b.fiscalError ? ` · ${b.fiscalError}` : " · waiting for the printer"}
+                </span>
+                <span style={{ fontFamily: MONO, fontSize: 14, color: C.cream }}>{money(b.total, cur)}</span>
+              </div>
+            ))}
+            <div style={{ padding: "10px 16px", fontFamily: SANS, fontSize: 11.5, color: C.sageDim, lineHeight: 1.5 }}>
+              A cash sale needs a fiscal receipt at the time of payment. Check the
+              printer — see docs/fiscal-bridge.md.
+            </div>
+          </div>
+        );
+      })()}
 
       {unpaid.length > 0 && (
         <div style={{ marginTop: 16, background: C.panel, border: `1px solid rgba(212,103,74,0.35)`, borderRadius: 14, overflow: "hidden" }}>
