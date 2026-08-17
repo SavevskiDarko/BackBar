@@ -161,6 +161,17 @@ export async function loadFiscalProblems(client, barId) {
   return rows.map(mapBill);
 }
 
+/** Reset a bar owner's PIN. Platform only. The returned PIN is the one moment
+    it is ever readable — afterwards it exists only as a bcrypt hash. */
+export async function resetOwnerPin(barId, pin) {
+  return unwrap(await supabase.rpc("reset_owner_pin", { p_bar: barId, p_pin: pin || null }));
+}
+
+/** An owner resetting one of their waiters. */
+export async function resetStaffPin(client, staffId, pin) {
+  return unwrap(await client.rpc("reset_staff_pin", { p_staff: staffId, p_pin: pin || null }));
+}
+
 export async function setBranding(client, barId, { accent, surface }) {
   unwrap(await client.rpc("set_branding", {
     p_bar: barId, p_accent: accent || null, p_surface: surface || null,

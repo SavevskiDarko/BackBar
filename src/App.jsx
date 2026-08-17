@@ -357,6 +357,7 @@ function CodeEntry({ length, onSubmit, error, dotLabel, busy }) {
 function AuthScreen({ platformName, pairedVenue, onPair, onUnpair, onPin, onPlatform, error, clearError, busy }) {
   const [mode, setMode] = useState(pairedVenue ? "pin" : "pair");
   const [hint, setHint] = useState(false);
+  const [forgot, setForgot] = useState(false);
 
   useEffect(() => { setMode(pairedVenue ? "pin" : "pair"); }, [pairedVenue]);
   const go = (m) => { clearError(); setMode(m); };
@@ -383,6 +384,28 @@ function AuthScreen({ platformName, pairedVenue, onPair, onUnpair, onPin, onPlat
         {mode === "pair" && <CodeEntry length={4} onSubmit={onPair} error={error} busy={busy} dotLabel="pair" />}
         {mode === "pin" && <CodeEntry length={4} onSubmit={onPin} error={error} busy={busy} dotLabel="pin" />}
         {mode === "platform" && <PlatformForm onSubmit={onPlatform} error={error} busy={busy} />}
+
+        {mode === "pin" && (
+          <div style={{ textAlign: "center", marginTop: 4 }}>
+            <button onClick={() => setForgot(!forgot)} style={linkBtn}>Forgotten your PIN?</button>
+            {forgot && (
+              <div style={{ marginTop: 10, background: C.panel, border: `1px dashed ${C.line2}`,
+                borderRadius: 11, padding: 14, textAlign: "left", fontFamily: SANS,
+                fontSize: 12.5, color: C.sage, lineHeight: 1.6 }}>
+                PINs are stored scrambled, so nobody can look yours up — it has to
+                be replaced.
+                <div style={{ marginTop: 8, color: C.sageDim }}>
+                  <strong style={{ color: C.cream }}>Waiter?</strong> Ask the owner.
+                  They can issue you a new one from the Team tab in seconds.
+                </div>
+                <div style={{ marginTop: 6, color: C.sageDim }}>
+                  <strong style={{ color: C.cream }}>Owner?</strong> Contact {platformName}.
+                  Your bar keeps taking orders meanwhile — waiter PINs are unaffected.
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <div style={{ display: "flex", justifyContent: "center", gap: 14, marginTop: 18, flexWrap: "wrap" }}>
           {mode === "pin" && (
@@ -1347,6 +1370,7 @@ function Notice({ tone, icon: Icon, children }) {
 
 function Team({ venue, staff, flash, actions }) {
   const [editing, setEditing] = useState(null);
+  const [issued, setIssued] = useState(null);
   const plan = PLANS[venue.subscription.plan];
 
   // The database rejects a PIN already used at this bar, so we don't duplicate
@@ -1394,7 +1418,11 @@ function Team({ venue, staff, flash, actions }) {
               <div style={{ fontFamily: SANS, fontSize: 14, color: C.cream, fontWeight: 600 }}>{s.name}</div>
               <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>Waiter — orders and payments only</div>
             </div>
-            <Btn size="sm" variant="bare" icon={KeyRound} title="Change PIN" onClick={() => setEditing({ id: s.id, name: s.name, pin: "" })} />
+            <Btn size="sm" variant="bare" icon={KeyRound} title="Give them a new PIN"
+              onClick={async () => {
+                const pin = await actions.resetStaffPin(s.id);
+                if (pin) setIssued({ pin, name: s.name });
+              }} />
             <Btn size="sm" variant="bare" icon={Trash2} style={{ color: C.sageDim }} onClick={() => actions.removeStaff(s.id)} />
           </div>
         ))}
@@ -1416,6 +1444,24 @@ function Team({ venue, staff, flash, actions }) {
           }} />
         </button>
       </div>
+
+      {issued && (
+        <Modal onClose={() => setIssued(null)} width={340}>
+          <div style={{ textAlign: "center" }}>
+            <KeyRound size={20} color={C.brass} />
+            <div style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 16, marginTop: 12 }}>
+              New PIN for {issued.name}
+            </div>
+            <div style={{ fontFamily: MONO, fontSize: 36, letterSpacing: "0.24em", color: C.brass, margin: "16px 0 6px" }}>
+              {issued.pin}
+            </div>
+            <div style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim, lineHeight: 1.5 }}>
+              Tell them now — PINs are stored scrambled and can't be shown again.
+            </div>
+            <Btn variant="solid" style={{ width: "100%", marginTop: 16 }} onClick={() => setIssued(null)}>Done</Btn>
+          </div>
+        </Modal>
+      )}
 
       {editing && (
         <Modal onClose={() => setEditing(null)} width={340}>
@@ -1574,6 +1620,7 @@ function Branding({ venue, flash, actions }) {
 function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loading }) {
   const [detail, setDetail] = useState(null);
   const [adding, setAdding] = useState(null);
+  const [issued, setIssued] = useState(null);
 
   const states = venues.map((v) => subState(v, now));
   const mrr = venues.reduce((s, v, i) => s + (canOperate(states[i]) ? v.subscription.price : 0), 0);
@@ -1689,8 +1736,16 @@ function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loadi
               </Btn>
             </div>
 
-            <Btn icon={LayoutGrid} style={{ width: "100%", marginBottom: 16 }} onClick={() => { setDetail(null); openAsOwner(v.id); }}>
+            <Btn icon={LayoutGrid} style={{ width: "100%", marginBottom: 10 }} onClick={() => { setDetail(null); openAsOwner(v.id); }}>
               Open this bar as the owner
+            </Btn>
+
+            <Btn icon={KeyRound} style={{ width: "100%", marginBottom: 16 }}
+              onClick={async () => {
+                const pin = await actions.resetOwnerPin(v);
+                if (pin) { setDetail(null); setIssued({ pin, bar: v.name, owner: v.ownerName }); }
+              }}>
+              Owner forgot their PIN
             </Btn>
 
             <Eyebrow style={{ marginBottom: 8 }}>Bar code — put this into their tablets once</Eyebrow>
@@ -1728,6 +1783,27 @@ function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loadi
           </Modal>
         );
       })()}
+
+      {issued && (
+        <Modal onClose={() => setIssued(null)} width={360}>
+          <div style={{ textAlign: "center" }}>
+            <KeyRound size={22} color={C.brass} />
+            <div style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 17, marginTop: 12 }}>
+              New PIN for {issued.bar}
+            </div>
+            <div style={{ fontFamily: MONO, fontSize: 40, letterSpacing: "0.24em", color: C.brass, margin: "18px 0 6px" }}>
+              {issued.pin}
+            </div>
+            <div style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim, lineHeight: 1.55 }}>
+              Read this to {issued.owner} now — it is stored as a hash and can
+              never be shown again. Their old PIN no longer works.
+            </div>
+            <Btn variant="solid" style={{ width: "100%", marginTop: 18 }} onClick={() => setIssued(null)}>
+              Done
+            </Btn>
+          </div>
+        </Modal>
+      )}
 
       {adding && (
         <Modal onClose={() => setAdding(null)} width={400}>
@@ -2066,6 +2142,7 @@ export default function App() {
     saveArticle: (a) => guard((c) => api.upsertArticle(c, venue.id, a), "Price list updated"),
     removeArticle: (id) => guard((c) => api.deleteArticle(c, id), "Article removed"),
     saveStaff: (s2) => guard((c) => api.upsertStaff(c, venue.id, s2), "Team updated"),
+    resetStaffPin: (id) => guard((c) => api.resetStaffPin(c, id)),
     removeStaff: (id) => guard((c) => api.deactivateStaff(c, id)),
     setDiscountPolicy: (v) => guard((c) => api.setDiscountPolicy(c, venue.id, v)),
     saveBranding: (b) => guard((c) => api.setBranding(c, venue.id, b)),
@@ -2222,6 +2299,7 @@ export default function App() {
         plan: d.plan, trialDays: Number(d.trialDays) || 0,
       })),
       recordPayment: (v) => run(() => api.recordPayment(v.id), `${v.name} marked paid`),
+      resetOwnerPin: (v) => run(() => api.resetOwnerPin(v.id)),
       toggleSuspend: (v) => run(
         () => api.setSuspended(v.id, !v.subscription.suspended),
         v.subscription.suspended ? `${v.name} reactivated` : `${v.name} suspended — nobody there can sign in`
