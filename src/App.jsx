@@ -2497,6 +2497,9 @@ export default function App() {
         {isOwner && currentTab === "team" && (
           <Team venue={venue} staff={data.staff || []} flash={flash} actions={barActions} />
         )}
+        {isOwner && currentTab === "brand" && (
+          <Branding venue={venue} flash={flash} actions={barActions} />
+        )}
       </main>
 
       {table && venue && (

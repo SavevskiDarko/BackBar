@@ -10,7 +10,11 @@
    new CACHE name on deploy retires everything from the previous build.
    =========================================================================== */
 
-const CACHE = "backbar-shell-v1";
+/* __BUILD_ID__ is replaced at build time (scripts/stamp-sw.mjs). A fixed cache
+   name meant a deployed update could keep serving the previous bundle until the
+   customer cleared their cache — unacceptable for an installed app on a bar
+   tablet that nobody thinks to reset. */
+const CACHE = "backbar-shell-__BUILD_ID__";
 
 self.addEventListener("install", (e) => {
   // A fresh worker should take over straight away — a bar tablet may sit open
@@ -29,6 +33,15 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("message", (e) => {
   if (e.data === "skip-waiting") self.skipWaiting();
+});
+
+// Tell every open tab that a new version is live, so they can reload instead of
+// running last week's code until the app is force-quit.
+self.addEventListener("activate", (e) => {
+  e.waitUntil((async () => {
+    const clients = await self.clients.matchAll({ type: "window" });
+    for (const c of clients) c.postMessage({ type: "sw-updated", cache: CACHE });
+  })());
 });
 
 self.addEventListener("fetch", (event) => {

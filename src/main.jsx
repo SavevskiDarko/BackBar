@@ -52,6 +52,16 @@ if ("serviceWorker" in navigator) {
       console.warn("Backbar: service worker not registered", e.message)
     );
   });
+
+  /* When a new version takes over, reload once so staff aren't running last
+     week's app. Guarded against a reload loop. */
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener("message", (e) => {
+    if (e.data?.type === "sw-updated" && !reloaded) {
+      reloaded = true;
+      location.reload();
+    }
+  });
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(

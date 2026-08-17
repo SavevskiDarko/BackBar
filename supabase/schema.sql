@@ -341,14 +341,22 @@ end $$;
 revoke execute on function verify_staff_pin(text, text) from anon, authenticated;
 
 -- Hash a PIN on the way in, so plaintext is never stored.
+-- Only the bar's own owner may set a PIN. Without this check any signed-in
+-- waiter could reset the owner's PIN and then sign in as them.
 create or replace function set_staff_pin(p_staff uuid, p_pin text)
 returns void language plpgsql security definer set search_path = public, extensions as $$
+declare v_bar uuid;
 begin
-  if length(p_pin) <> 4 or p_pin !~ '^[0-9]{4}$' then
+  select bar_id into v_bar from staff where id = p_staff;
+  if v_bar is null then raise exception 'unknown_staff'; end if;
+  if not (is_owner_of(v_bar) or is_platform()) then raise exception 'owners_only'; end if;
+  if p_pin !~ '^[0-9]{4}$' then
     raise exception 'PIN must be exactly 4 digits';
   end if;
   update staff set pin_hash = crypt(p_pin, gen_salt('bf')) where id = p_staff;
 end $$;
+
+revoke execute on function set_staff_pin(uuid, text) from anon;
 
 -- ---------------------------------------------------------------------------
 -- Recording a subscription payment (you only) — pushes the due date forward.
