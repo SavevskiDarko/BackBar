@@ -10,28 +10,32 @@
 
 create or replace function protect_last_owner() returns trigger
 language plpgsql security definer set search_path = public as $$
-declare v_remaining int;
+declare v_remaining int; v_row record;
 begin
-  -- Only the platform may remove or disable an owner, and only if another
-  -- owner would remain.
-  if tg_op = 'DELETE' then
-    if old.role <> 'owner' then return old; end if;
-  else
-    -- An UPDATE only matters if it disables the owner or demotes them.
-    if old.role <> 'owner' then return new; end if;
-    if new.active and new.role = 'owner' then return new; end if;
-  end if;
+  v_row := case when tg_op = 'DELETE' then old else new end;
+
+  if old.role <> 'owner' then return v_row; end if;
+
+  -- An update that leaves them an active owner is not a removal.
+  if tg_op = 'UPDATE' and new.active and new.role = 'owner' then return new; end if;
+
+  -- The bar itself is being deleted. Postgres runs ON DELETE CASCADE after the
+  -- parent row is gone, so its absence distinguishes a cascade from someone
+  -- deleting a person.
+  if not exists (select 1 from bars where id = old.bar_id) then return v_row; end if;
+
+  -- The platform may replace an owner deliberately.
+  if is_platform() then return v_row; end if;
 
   select count(*) into v_remaining
   from staff
-  where bar_id = old.bar_id and role = 'owner' and active
-    and id <> old.id;
+  where bar_id = old.bar_id and role = 'owner' and active and id <> old.id;
 
   if v_remaining = 0 then
     raise exception 'A bar must keep one active owner. Ask the platform to reset the PIN instead.';
   end if;
 
-  return case when tg_op = 'DELETE' then old else new end;
+  return v_row;
 end $$;
 
 drop trigger if exists staff_protect_owner on staff;
