@@ -1462,6 +1462,22 @@ function ProductsSold({ rows, loading, cur }) {
   }), { qty: 0, gross: 0, profit: 0 });
 
   const GRID = "minmax(0,1fr) 62px 92px 92px 62px";
+
+  /* On a phone the sort options are chips. As bare uppercase labels they read
+     as column headings — which is what they are on a wide screen, and exactly
+     what they are not here. */
+  const chip = (key, label) => (
+    <button key={key} onClick={() => { setDir(sort === key ? -dir : -1); setSort(key); }} style={{
+      padding: "6px 11px", borderRadius: 99, cursor: "pointer",
+      border: `1px solid ${sort === key ? C.brass : C.line}`,
+      background: sort === key ? C.a10 : "transparent",
+      color: sort === key ? C.brass : C.sage,
+      fontFamily: SANS, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap",
+    }}>
+      {label}{sort === key ? (dir === -1 ? " ↓" : " ↑") : ""}
+    </button>
+  );
+
   const head = (key, label, align = "right") => (
     <button onClick={() => { setDir(sort === key ? -dir : -1); setSort(key); }} style={{
       background: "transparent", border: "none", cursor: "pointer", padding: 0,
@@ -1491,13 +1507,13 @@ function ProductsSold({ rows, loading, cur }) {
       <div style={{ display: "flex", gap: 14, padding: "10px 18px", flexWrap: "wrap",
         background: C.raise, borderBottom: `1px solid ${C.line}` }}>
         {narrow ? (
-          <>
-            <span style={{ fontFamily: SANS, fontSize: 10, fontWeight: 700, letterSpacing: "0.16em",
-              textTransform: "uppercase", color: C.sageDim, marginRight: "auto" }}>Sort by</span>
-            {head("qty", "Sold", "left")}
-            {head("gross", "Money", "left")}
-            {head("profit", "Profit", "left")}
-          </>
+          <div style={{ display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center", width: "100%" }}>
+            <span style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim, marginRight: 2 }}>Sort</span>
+            {chip("name", "Name")}
+            {chip("qty", "Sold")}
+            {chip("gross", "Money")}
+            {chip("profit", "Profit")}
+          </div>
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: GRID, gap: 14, width: "100%" }}>
             {head("name", "Product", "left")}
@@ -1518,21 +1534,25 @@ function ProductsSold({ rows, loading, cur }) {
             {narrow ? (
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
-                  <span style={{ fontFamily: SANS, fontSize: 14, color: C.cream, minWidth: 0,
+                  <span style={{ fontFamily: SANS, fontSize: 14.5, color: C.cream, minWidth: 0,
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
                   <span style={{ fontFamily: MONO, fontSize: 15, color: C.cream, whiteSpace: "nowrap" }}>
-                    {r.qty} <span style={{ fontSize: 11, color: C.sageDim }}>sold</span>
+                    {money(Number(r.gross) || 0, cur)}
                   </span>
                 </div>
+                {/* Every number says what it is. Two bare amounts side by side
+                    are unreadable — which one was the profit? */}
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginTop: 4 }}>
                   <span style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>
-                    {r.category} · {Number(r.share || 0).toFixed(1)}% of takings
+                    <span style={{ fontFamily: MONO, color: C.sage }}>{r.qty}</span> sold
+                    {" · "}{r.category}
+                    {" · "}{Number(r.share || 0).toFixed(0)}%
                   </span>
-                  <span style={{ fontFamily: MONO, fontSize: 12, color: C.creamDim, whiteSpace: "nowrap" }}>
-                    {money(Number(r.gross) || 0, cur)}
-                    {Number(r.cost) > 0 && (
-                      <span style={{ color: C.brass }}> · {money(Number(r.profit) || 0, cur)}</span>
-                    )}
+                  <span style={{ fontFamily: SANS, fontSize: 11.5, whiteSpace: "nowrap",
+                    color: Number(r.cost) > 0 ? C.brass : C.sageDim }}>
+                    {Number(r.cost) > 0
+                      ? <>profit <span style={{ fontFamily: MONO, fontSize: 12.5 }}>{money(Number(r.profit) || 0, cur)}</span></>
+                      : "no buy price"}
                   </span>
                 </div>
               </>
@@ -1569,17 +1589,35 @@ function ProductsSold({ rows, loading, cur }) {
       </div>
 
       {shown.length > 0 && (
-        <div style={{ display: narrow ? "flex" : "grid", justifyContent: narrow ? "space-between" : undefined,
-          gridTemplateColumns: narrow ? undefined : GRID, gap: 14, padding: "12px 18px",
-          background: C.raise, borderTop: `1px solid ${C.line}` }}>
-          <span style={{ fontFamily: SANS, fontSize: 12, fontWeight: 700, color: C.sage }}>
-            {shown.length} product{shown.length > 1 ? "s" : ""}
-          </span>
-          <span style={{ fontFamily: MONO, fontSize: 13, color: C.cream, textAlign: "right" }}>{totals.qty}</span>
-          <span style={{ fontFamily: MONO, fontSize: 13, color: C.cream, textAlign: "right" }}>{money(totals.gross, cur)}</span>
-          <span style={{ fontFamily: MONO, fontSize: 13, color: C.brass, textAlign: "right" }}>{money(totals.profit, cur)}</span>
-          <span />
-        </div>
+        narrow ? (
+          <div style={{ padding: "12px 18px", background: C.raise, borderTop: `1px solid ${C.line}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+              <span style={{ fontFamily: SANS, fontSize: 13, fontWeight: 700, color: C.cream }}>
+                {shown.length} product{shown.length > 1 ? "s" : ""}
+              </span>
+              <span style={{ fontFamily: MONO, fontSize: 15, color: C.cream }}>{money(totals.gross, cur)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginTop: 4 }}>
+              <span style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>
+                <span style={{ fontFamily: MONO, color: C.sage }}>{totals.qty}</span> sold
+              </span>
+              <span style={{ fontFamily: SANS, fontSize: 11.5, color: C.brass }}>
+                profit <span style={{ fontFamily: MONO, fontSize: 12.5 }}>{money(totals.profit, cur)}</span>
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: GRID, gap: 14, padding: "12px 18px",
+            background: C.raise, borderTop: `1px solid ${C.line}` }}>
+            <span style={{ fontFamily: SANS, fontSize: 12, fontWeight: 700, color: C.sage }}>
+              {shown.length} product{shown.length > 1 ? "s" : ""}
+            </span>
+            <span style={{ fontFamily: MONO, fontSize: 13, color: C.cream, textAlign: "right" }}>{totals.qty}</span>
+            <span style={{ fontFamily: MONO, fontSize: 13, color: C.cream, textAlign: "right" }}>{money(totals.gross, cur)}</span>
+            <span style={{ fontFamily: MONO, fontSize: 13, color: C.brass, textAlign: "right" }}>{money(totals.profit, cur)}</span>
+            <span />
+          </div>
+        )
       )}
     </div>
   );
