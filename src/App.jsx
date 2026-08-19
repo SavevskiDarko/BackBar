@@ -416,6 +416,7 @@ function AuthScreen({ platformName, pairedVenue, onPair, onUnpair, onPin, onPlat
           {mode === "platform" && <button onClick={() => go(pairedVenue ? "pin" : "pair")} style={linkBtn}>Back</button>}
         </div>
 
+        <UpdateChip />
         <button onClick={() => setHint(!hint)} style={{ ...linkBtn, width: "100%", marginTop: 14 }}>
           {hint ? "Hide" : "Where do I get a code?"}
         </button>
@@ -2261,6 +2262,29 @@ function Mark({ logoUrl, size = 30, radius = 8 }) {
   );
 }
 
+/* A new build is live. Offer it rather than forcing it: reloading while a
+   waiter is mid-order would lose the round they are taking. */
+function UpdateChip() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    const on = () => setReady(true);
+    window.addEventListener("backbar:update-ready", on);
+    return () => window.removeEventListener("backbar:update-ready", on);
+  }, []);
+  if (!ready) return null;
+  return (
+    <button onClick={() => location.reload()} style={{
+      position: "fixed", bottom: 22, left: "50%", transform: "translateX(-50%)", zIndex: 210,
+      display: "flex", alignItems: "center", gap: 9, padding: "11px 18px", borderRadius: 99,
+      background: C.brass, color: C.onBrass, border: "none", cursor: "pointer",
+      fontFamily: SANS, fontSize: 13, fontWeight: 700,
+      boxShadow: "0 10px 40px -10px rgba(0,0,0,0.8)",
+    }}>
+      <RotateCw size={15} /> New version ready — tap to update
+    </button>
+  );
+}
+
 function Splash({ text = "Opening the floor…" }) {
   return (
     <div style={{ minHeight: "100vh", background: C.ink, display: "grid", placeItems: "center", padding: 24 }}>
@@ -2941,6 +2965,8 @@ export default function App() {
           onSettle={settleOrder}
         />
       )}
+
+      <UpdateChip />
 
       {toast && (
         <div style={{

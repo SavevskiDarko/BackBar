@@ -38,8 +38,19 @@ create or replace function stamp_line_prices() returns trigger
 language plpgsql security definer set search_path = public, extensions as $$
 declare a articles%rowtype; o orders%rowtype;
 begin
+  -- A cascade nulling the article reference is not a real edit.
+  if new.article_id is null then return new; end if;
+
+  -- Nothing price-relevant changed. The stamped values are a record of the
+  -- sale, not a live lookup, so leave them alone.
+  if tg_op = 'UPDATE'
+     and new.article_id is not distinct from old.article_id
+     and new.qty is not distinct from old.qty then
+    return new;
+  end if;
+
   select * into o from orders where id = new.order_id;
-  if not found then raise exception 'unknown_order'; end if;
+  if not found then return new; end if;
 
   select * into a from articles where id = new.article_id and bar_id = o.bar_id;
   if not found then raise exception 'article_not_on_this_bars_list'; end if;
@@ -51,6 +62,11 @@ begin
   new.vat_rate   := a.vat_rate;     -- the rate as at this sale
   return new;
 end $$;
+
+drop trigger if exists order_lines_stamp_prices on order_lines;
+create trigger order_lines_stamp_prices
+  before insert or update of article_id, qty on order_lines
+  for each row execute function stamp_line_prices();
 
 -- ---------------------------------------------------------------------------
 -- What the bar needs on a fiscal receipt

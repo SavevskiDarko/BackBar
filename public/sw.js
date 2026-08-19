@@ -1,47 +1,52 @@
 /* ===========================================================================
    Backbar service worker
 
-   Its job is narrow: keep the app shell available when the wifi isn't. Data
-   caching and the write queue live in IndexedDB (src/lib/db.js), not here —
-   this only makes sure the app itself still opens.
+   Its job is narrow: keep the app openable when the wifi isn't. Data caching
+   and the write queue live in IndexedDB, not here.
 
-   Vite fingerprints filenames on every build, so there is no fixed list to
-   pre-cache. Instead assets are cached the first time they're fetched, and a
-   new CACHE name on deploy retires everything from the previous build.
+   The hard part of a service worker is not caching — it's making sure a new
+   version can actually reach a tablet that has been sitting on a wall for a
+   fortnight. Three things make that work, and all three are needed:
+
+     1. sw.js is served no-cache (see public/_headers), or the browser keeps
+        handing itself the old worker and never learns a new one exists
+     2. registration uses updateViaCache:"none" for the same reason
+     3. the app asks for an update check when it comes back to the foreground
+
+   __BUILD_ID__ is replaced at build time by scripts/stamp-sw.mjs, so every
+   deploy gets a fresh cache and retires the last one.
    =========================================================================== */
 
-/* __BUILD_ID__ is replaced at build time (scripts/stamp-sw.mjs). A fixed cache
-   name meant a deployed update could keep serving the previous bundle until the
-   customer cleared their cache — unacceptable for an installed app on a bar
-   tablet that nobody thinks to reset. */
-const CACHE = "backbar-shell-__BUILD_ID__";
+const BUILD = "__BUILD_ID__";
+const CACHE = `backbar-shell-${BUILD}`;
 
 self.addEventListener("install", (e) => {
-  // A fresh worker should take over straight away — a bar tablet may sit open
-  // for days, and waiting for every tab to close is not realistic.
+  // A bar tablet is never "closed", so waiting for every tab to go away would
+  // mean updates that never land.
   self.skipWaiting();
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(["/", "/manifest.webmanifest"])));
+  e.waitUntil(
+    caches.open(CACHE).then((c) =>
+      c.addAll(["/", "/manifest.webmanifest"]).catch(() => {})
+    )
+  );
 });
 
 self.addEventListener("activate", (e) => {
-  e.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim())
-  );
+  e.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)));
+    await self.clients.claim();
+
+    // Tell open tabs a new version is live. They decide when to reload —
+    // yanking the page out from under a waiter mid-order would be worse than
+    // running yesterday's build for another minute.
+    const clients = await self.clients.matchAll({ type: "window" });
+    for (const c of clients) c.postMessage({ type: "sw-updated", build: BUILD });
+  })());
 });
 
 self.addEventListener("message", (e) => {
   if (e.data === "skip-waiting") self.skipWaiting();
-});
-
-// Tell every open tab that a new version is live, so they can reload instead of
-// running last week's code until the app is force-quit.
-self.addEventListener("activate", (e) => {
-  e.waitUntil((async () => {
-    const clients = await self.clients.matchAll({ type: "window" });
-    for (const c of clients) c.postMessage({ type: "sw-updated", cache: CACHE });
-  })());
 });
 
 self.addEventListener("fetch", (event) => {
@@ -51,12 +56,15 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Never cache the API. A stale login or a stale bar snapshot is worse than
-  // an honest failure the app can handle.
+  // Never cache the API. A stale login or a stale floor is worse than an
+  // honest failure the app already knows how to handle.
   if (url.pathname.startsWith("/api/")) return;
 
-  // Navigations: try the network so a deploy is picked up, fall back to the
-  // cached shell so the app still opens with no signal.
+  // Never cache the worker or the manifest — that is how a device gets stuck.
+  if (url.pathname === "/sw.js" || url.pathname === "/manifest.webmanifest") return;
+
+  // Navigations: network first so a deploy is picked up, cache as the fallback
+  // so the app still opens with no signal.
   if (request.mode === "navigate") {
     event.respondWith(
       fetch(request)
@@ -70,7 +78,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Everything else — hashed JS, CSS, icons — is immutable, so cache first.
+  // Hashed JS, CSS and icons never change under the same name, so cache first.
   event.respondWith(
     caches.match(request).then((hit) => {
       if (hit) return hit;

@@ -21,6 +21,11 @@ function friendly(msg = "") {
   if (msg.includes("pin_taken_at_this_bar")) return "Someone here already uses that PIN.";
   if (msg.includes("pin_must_be_4_digits")) return "A PIN must be exactly 4 digits.";
   if (msg.includes("order_already_closed")) return "That bill was already closed on another device.";
+  if (msg.includes("unknown_order")) return "That order no longer exists — it may have been closed elsewhere.";
+  if (msg.includes("unknown_bar")) return "That bar no longer exists.";
+  if (msg.includes("confirmation_does_not_match")) return "The name you typed doesn't match.";
+  if (msg.includes("article_not_on_this_bars_list")) return "That item isn't on this bar's price list.";
+  if (msg.includes("must keep one active owner")) return "A bar must keep one active owner.";
   if (msg.includes("Billing settings")) return "Only the platform can change billing.";
   if (msg.includes("owners_only")) return "Only the bar owner can do that.";
   if (msg.includes("row-level security") || msg.includes("not_authorised"))

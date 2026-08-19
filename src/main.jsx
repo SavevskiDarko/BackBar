@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import "./index.css";
 
-/* Phones and tablets have no usable devtools, so a crash must explain itself
+/* Phones and tablets have no usable devtools, so a crash has to explain itself
    on screen. Without this, any render error is a black rectangle. */
 class Boundary extends React.Component {
   constructor(p) {
@@ -44,22 +44,38 @@ class Boundary extends React.Component {
   }
 }
 
-/* Register the service worker so the app opens with no signal. Failure here is
-   not fatal — the app just loses offline shell caching. */
+/* --------------------------------------------------------------- updating
+
+   A tablet mounted on a wall is never closed and rarely reloaded, so it will
+   sit on an old build unless the app goes looking for a new one.
+
+   updateViaCache:"none" is the important part: without it the browser may
+   serve itself a cached copy of sw.js for up to 24 hours and never discover
+   that a new version was deployed. */
+
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch((e) =>
-      console.warn("Backbar: service worker not registered", e.message)
-    );
+  window.addEventListener("load", async () => {
+    try {
+      const reg = await navigator.serviceWorker.register("/sw.js", { updateViaCache: "none" });
+
+      // Check when the app comes back to the foreground, and hourly for a
+      // device that simply stays on all night.
+      const check = () => reg.update().catch(() => {});
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") check();
+      });
+      setInterval(check, 60 * 60 * 1000);
+    } catch (e) {
+      console.warn("Backbar: service worker not registered", e.message);
+    }
   });
 
-  /* When a new version takes over, reload once so staff aren't running last
-     week's app. Guarded against a reload loop. */
-  let reloaded = false;
+  /* When a new version activates, tell the app rather than reloading. Pulling
+     the page out from under a waiter mid-order is worse than running the
+     previous build for another minute — App.jsx offers them the reload. */
   navigator.serviceWorker.addEventListener("message", (e) => {
-    if (e.data?.type === "sw-updated" && !reloaded) {
-      reloaded = true;
-      location.reload();
+    if (e.data?.type === "sw-updated") {
+      window.dispatchEvent(new CustomEvent("backbar:update-ready"));
     }
   });
 }

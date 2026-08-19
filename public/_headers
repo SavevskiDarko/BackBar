@@ -1,0 +1,22 @@
+# Cloudflare serves these headers with the static assets.
+#
+# The service worker and the HTML shell must always be revalidated. Without
+# this the browser can hand itself a cached sw.js for up to 24 hours, never
+# learn that a new version exists, and a wall-mounted tablet stays on an old
+# build indefinitely. This is the single most important file for updates.
+
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/manifest.webmanifest
+  Cache-Control: no-cache
+
+/
+  Cache-Control: no-cache
+
+/index.html
+  Cache-Control: no-cache
+
+# Vite fingerprints these, so the name changes whenever the content does.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
