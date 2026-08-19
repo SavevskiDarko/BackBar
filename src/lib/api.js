@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { clearOutbox } from "./db";
 
 /* ===========================================================================
    Every read and write the app makes.
@@ -26,6 +27,8 @@ function friendly(msg = "") {
   if (msg.includes("confirmation_does_not_match")) return "The name you typed doesn't match.";
   if (msg.includes("article_not_on_this_bars_list")) return "That item isn't on this bar's price list.";
   if (msg.includes("must keep one active owner")) return "A bar must keep one active owner.";
+  if (msg.includes("has_fiscal_receipts"))
+    return "Some bills already have fiscal receipts. Those are issued records and can't be cleared.";
   if (msg.includes("Billing settings")) return "Only the platform can change billing.";
   if (msg.includes("owners_only")) return "Only the bar owner can do that.";
   if (msg.includes("row-level security") || msg.includes("not_authorised"))
@@ -168,6 +171,28 @@ export async function loadFiscalProblems(client, barId) {
 
 /** Reset a bar owner's PIN. Platform only. The returned PIN is the one moment
     it is ever readable — afterwards it exists only as a bcrypt hash. */
+/** What a reset would erase, and what would survive it. */
+export async function resetPreview(client, barId) {
+  return unwrap(await client.rpc("bar_reset_preview", { p_bar: barId }));
+}
+
+/** Wipes trading history, keeps everything the bar set up. The local outbox
+    goes too — a queued order would otherwise sync back in after the reset and
+    reappear as a mystery bill. */
+export async function resetBarData(client, barId, confirm, force = false) {
+  const out = unwrap(await client.rpc("reset_bar_data", {
+    p_bar: barId, p_confirm: confirm, p_force: force,
+  }));
+  await clearOutbox();
+  return out;
+}
+
+/* Platform-side variants. You act through the shared auth session, not a
+   staff token, so these use the module client instead of taking one. */
+export const platformResetPreview = (barId) => resetPreview(supabase, barId);
+export const platformResetBar = (barId, confirm, force = false) =>
+  resetBarData(supabase, barId, confirm, force);
+
 /** What deleting this bar would destroy. Shown before the confirmation. */
 export async function barDeletePreview(barId) {
   return unwrap(await supabase.rpc("bar_delete_preview", { p_bar: barId }));

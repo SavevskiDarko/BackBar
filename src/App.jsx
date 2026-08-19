@@ -1279,7 +1279,7 @@ function SplitList({ rows, cur, nameKey = "name", valueKey = "gross", sub }) {
   );
 }
 
-function Reports({ venue, report, products, productsLoading, loading, mode, setMode, anchor, setAnchor, unpaid, onSettleUnpaid, onExport, exporting, actions, onTestPrinter, onRetryFiscal }) {
+function Reports({ venue, report, products, productsLoading, loading, mode, setMode, anchor, setAnchor, unpaid, onSettleUnpaid, onExport, exporting, actions, onTestPrinter, onRetryFiscal, onReset }) {
   const cur = venue.currency;
   const t = report?.totals || {};
   const prev = report?.previous || {};
@@ -1425,6 +1425,20 @@ function Reports({ venue, report, products, productsLoading, loading, mode, setM
 
       <FiscalPanel venue={venue} actions={actions} onTest={onTestPrinter}
         onRetryAll={onRetryFiscal} stuck={att.noFiscal || 0} />
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16, padding: "14px 18px",
+        background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div style={{ fontFamily: SANS, fontSize: 13.5, fontWeight: 600, color: C.cream }}>
+            Finished testing?
+          </div>
+          <div style={{ fontFamily: SANS, fontSize: 12, color: C.sageDim, marginTop: 3, lineHeight: 1.45 }}>
+            Clear practice bills and open with real numbers. Your price list, floor
+            plan and team stay exactly as they are.
+          </div>
+        </div>
+        <Btn icon={RotateCw} onClick={onReset}>Start clean</Btn>
+      </div>
 
       <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim, marginTop: 14, lineHeight: 1.5 }}>
         A day runs from {String(report?.cutoffHour ?? 5).padStart(2, "0")}:00 to
@@ -1722,6 +1736,76 @@ function Panel({ title, children, flex }) {
   );
 }
 
+/* Clearing a bar's practice runs before it opens for real. The list of what
+   survives matters as much as what goes — an owner will not press this unless
+   they can see their price list is safe. */
+function ResetDialog({ preview, cur, onCancel, onConfirm, busy }) {
+  const [typed, setTyped] = useState("");
+  const blocked = (preview.fiscalReceipts || 0) > 0;
+
+  return (
+    <Modal onClose={onCancel} width={420}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+        <RotateCw size={19} color={C.brass} />
+        <span style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 17 }}>
+          Start {preview.name} clean
+        </span>
+      </div>
+      <div style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim, marginBottom: 14, lineHeight: 1.5 }}>
+        For a bar that has finished testing and is about to open properly.
+      </div>
+
+      <div style={{ display: "grid", gap: 10, marginBottom: 14 }}>
+        <div style={{ background: C.ink, border: "1px solid rgba(212,103,74,0.3)", borderRadius: 11, padding: 13 }}>
+          <Eyebrow style={{ color: C.copper, marginBottom: 8 }}>Erased</Eyebrow>
+          <div style={{ fontFamily: MONO, fontSize: 12.5, color: C.sage, display: "grid", gap: 4 }}>
+            <Row2 a={`${preview.bills} bills`} b={money(Number(preview.takings) || 0, cur)} />
+            <Row2 a={`${preview.openOrders} tables still open`} b="" />
+            {preview.firstBill && (
+              <Row2 a="covering" b={`${shortDate(Date.parse(preview.firstBill))} – ${shortDate(Date.parse(preview.lastBill))}`} />
+            )}
+          </div>
+        </div>
+
+        <div style={{ background: C.ink, border: `1px solid ${C.line2}`, borderRadius: 11, padding: 13 }}>
+          <Eyebrow style={{ color: C.mint, marginBottom: 8 }}>Kept</Eyebrow>
+          <div style={{ fontFamily: MONO, fontSize: 12.5, color: C.sage, display: "grid", gap: 4 }}>
+            <Row2 a={`${preview.articles} articles`} b="prices and VAT" />
+            <Row2 a={`${preview.tables} tables`} b="the floor plan" />
+            <Row2 a={`${preview.staff} people`} b="PINs unchanged" />
+            <Row2 a="branding" b="logo and colours" />
+          </div>
+        </div>
+      </div>
+
+      {blocked ? (
+        <div style={{ display: "flex", gap: 10, padding: "12px 14px", borderRadius: 11,
+          background: "rgba(212,103,74,0.1)", border: "1px solid rgba(212,103,74,0.35)" }}>
+          <AlertTriangle size={15} color={C.copper} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontFamily: SANS, fontSize: 12.5, color: C.cream, lineHeight: 1.5 }}>
+            {preview.fiscalReceipts} bill{preview.fiscalReceipts > 1 ? "s carry" : " carries"} a fiscal
+            receipt number. Those are issued records with a retention period, so this bar is past
+            testing and can't be cleared.
+          </span>
+        </div>
+      ) : (
+        <Field label={`Type ${preview.name} to confirm`} value={typed} onChange={setTyped} />
+      )}
+
+      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+        <Btn variant="ghost" style={{ flex: 1 }} onClick={onCancel}>Cancel</Btn>
+        {!blocked && (
+          <Btn variant="solid" icon={busy ? Loader2 : RotateCw} style={{ flex: 1 }}
+            disabled={busy || typed !== preview.name}
+            onClick={() => onConfirm(typed)}>
+            Clear and start
+          </Btn>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 function Row2({ a, b }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
@@ -1746,6 +1830,8 @@ function Team({ venue, staff: allStaff, flash, actions }) {
   const [editing, setEditing] = useState(null);
   const [issued, setIssued] = useState(null);
   const [deleting, setDeleting] = useState(null);   // { bar, preview }
+  const [resetting, setResetting] = useState(null); // { bar, preview }
+  const [resetBusy, setResetBusy] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   // Never list the owner here — deleting that row would lock them out of
   // their own bar. The database refuses it too, but it shouldn't be offered.
@@ -2011,6 +2097,8 @@ function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loadi
   const [adding, setAdding] = useState(null);
   const [issued, setIssued] = useState(null);
   const [deleting, setDeleting] = useState(null);   // { bar, preview }
+  const [resetting, setResetting] = useState(null); // { bar, preview }
+  const [resetBusy, setResetBusy] = useState(false);
   const [confirmText, setConfirmText] = useState("");
 
   const states = venues.map((v) => subState(v, now));
@@ -2170,6 +2258,14 @@ function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loadi
               {!v.subscription.payments.length && <div style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim }}>No payments recorded yet.</div>}
             </div>
 
+            <Btn icon={RotateCw} style={{ width: "100%", marginBottom: 16 }}
+              onClick={async () => {
+                const pv = await actions.resetPreview(v);
+                if (pv) { setDetail(null); setResetting({ bar: v, preview: pv }); }
+              }}>
+              Clear their test bills
+            </Btn>
+
             <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 18, paddingTop: 14 }}>
               <Eyebrow style={{ color: C.copper, marginBottom: 8 }}>Danger</Eyebrow>
               <Btn variant="danger" icon={Trash2} style={{ width: "100%" }}
@@ -2205,6 +2301,19 @@ function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loadi
             </Btn>
           </div>
         </Modal>
+      )}
+
+      {resetting && (
+        <ResetDialog
+          preview={resetting.preview} cur={resetting.bar.currency} busy={resetBusy}
+          onCancel={() => setResetting(null)}
+          onConfirm={async (confirm) => {
+            setResetBusy(true);
+            const ok = await actions.resetBar(resetting.bar, confirm);
+            setResetBusy(false);
+            if (ok) setResetting(null);
+          }}
+        />
       )}
 
       {deleting && (
@@ -2715,6 +2824,27 @@ export default function App() {
     }
   }, [client, venue, flash]);
 
+  const [resetPreview, setResetPreview] = useState(null);
+  const [resetBusy, setResetBusy] = useState(false);
+
+  const openReset = useCallback(async () => {
+    try { setResetPreview(await api.resetPreview(client, venue.id)); }
+    catch (e) { flash(e.message); }
+  }, [client, venue, flash]);
+
+  const doReset = useCallback(async (confirm) => {
+    setResetBusy(true);
+    try {
+      await api.resetBarData(client, venue.id, confirm);
+      setResetPreview(null);
+      await refresh();
+      loadReports();
+      flash("Cleared — open for real business");
+    } catch (e) { flash(e.message); }
+    finally { setResetBusy(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, venue, refresh, flash]);
+
   const testPrinter = useCallback(async (cfg) => {
     try {
       const st = await fiscal.printerStatus(cfg.url, cfg.token);
@@ -2840,6 +2970,8 @@ export default function App() {
       recordPayment: (v) => run(() => api.recordPayment(v.id), `${v.name} marked paid`),
       resetOwnerPin: (v) => run(() => api.resetOwnerPin(v.id)),
       deletePreview: (v) => api.barDeletePreview(v.id).catch((e) => { flash(e.message); return null; }),
+      resetPreview: (v) => api.platformResetPreview(v.id).catch((e) => { flash(e.message); return null; }),
+      resetBar: (v, confirm) => run(() => api.platformResetBar(v.id, confirm), `${v.name} cleared`),
       deleteBar: (v, confirm) => run(() => api.deleteBar(v.id, confirm, v.logoPath), `${v.name} deleted`),
       toggleSuspend: (v) => run(
         () => api.setSuspended(v.id, !v.subscription.suspended),
@@ -3132,6 +3264,7 @@ export default function App() {
             unpaid={unpaid} onSettleUnpaid={settleUnpaid}
             onExport={exportCsv} exporting={exporting}
             actions={barActions} onTestPrinter={testPrinter} onRetryFiscal={retryFiscal}
+            onReset={openReset}
           />
         )}
         {isOwner && currentTab === "team" && (
@@ -3152,6 +3285,13 @@ export default function App() {
           onClose={() => setOpenTableId(null)}
           onCommit={commitOrder}
           onSettle={settleOrder}
+        />
+      )}
+
+      {resetPreview && (
+        <ResetDialog
+          preview={resetPreview} cur={venue?.currency} busy={resetBusy}
+          onCancel={() => setResetPreview(null)} onConfirm={doReset}
         />
       )}
 
