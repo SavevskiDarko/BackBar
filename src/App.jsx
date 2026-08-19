@@ -3,7 +3,7 @@ import {
   LayoutGrid, Store, BarChart3, Plus, Minus, Trash2, X, Check, Circle, Square,
   RectangleHorizontal, Users, Clock, CreditCard, Banknote, Search, ChevronRight,
   Copy, Save, Receipt, RotateCw, Loader2, Wine, ListOrdered, LogOut, Delete,
-  ChevronLeft, Palette, ImageIcon, Printer,
+  ChevronLeft, Palette, ImageIcon, Printer, Martini, LayoutList,
   ShieldCheck, UserPlus, AlertTriangle, ArrowLeft, KeyRound, Pause, Play, Wallet,
 } from "lucide-react";
 
@@ -1413,7 +1413,7 @@ function Reports({ venue, report, products, productsLoading, loading, mode, setM
               sub={(r) => `${r.days} day${r.days > 1 ? "s" : ""}`} />
           </Panel>
         )}
-        <Panel title="Taken by each waiter" flex="1 1 260px">
+        <Panel title="Taken by" flex="1 1 260px">
           <SplitList rows={report?.byStaff || []} cur={cur} sub={(r) => `${r.bills} bills`} />
         </Panel>
         <Panel title="Where the money comes from" flex="1 1 260px">
@@ -1786,7 +1786,9 @@ function Team({ venue, staff: allStaff, flash, actions }) {
             <div style={{ fontFamily: SANS, fontSize: 14, color: C.cream, fontWeight: 600 }}>
               {venue.ownerName} <span style={{ color: C.sageDim, fontWeight: 400 }}>(you)</span>
             </div>
-            <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>Owner — sees money, floor plan and prices</div>
+            <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>
+              Owner — sees the money, and takes orders like anyone else
+            </div>
           </div>
           <span style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>PIN set at setup</span>
         </div>
@@ -1807,7 +1809,13 @@ function Team({ venue, staff: allStaff, flash, actions }) {
             <Btn size="sm" variant="bare" icon={Trash2} style={{ color: C.sageDim }} onClick={() => actions.removeStaff(s.id)} />
           </div>
         ))}
-        {!staff.length && <div style={{ padding: 20, fontFamily: SANS, fontSize: 13, color: C.sageDim }}>No waiters yet. Add one so they can start taking orders.</div>}
+        {!staff.length && (
+          <div style={{ padding: "18px 20px", fontFamily: SANS, fontSize: 13, color: C.sageDim, lineHeight: 1.6 }}>
+            No waiters — you're running this bar on your own, which works fine.
+            Use <strong style={{ color: C.brass }}>Serve</strong> at the top to hide the admin tabs
+            while you're on the floor. Add someone here when you take help on.
+          </div>
+        )}
       </div>
 
       <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
@@ -2475,6 +2483,19 @@ export default function App() {
   const installPrompt = useInstallPrompt();
   const [logoStamp, setLogoStamp] = useState(1);
 
+  /* In a small bar the owner works the floor. They can already take orders —
+     nothing ever stopped them — but six admin tabs mid-service is the wrong
+     shape. Serving mode collapses the app to the floor and back.
+
+     Remembered per device: the owner's phone can stay in serving mode while
+     the tablet behind the bar stays in owner mode. */
+  const [serving, setServing] = useState(() => {
+    try { return localStorage.getItem("backbar.serving") === "1"; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("backbar.serving", serving ? "1" : "0"); } catch { /* private mode */ }
+  }, [serving]);
+
   // Last known branding, so the app opens in the bar's colours rather than
   // flashing ours first.
   useEffect(() => { applyTheme(recallBrand()); }, []);
@@ -2890,7 +2911,7 @@ export default function App() {
 
   const tabs = isPlatform
     ? [["bars", "Bars & billing", Store]]
-    : isOwner
+    : isOwner && !serving
     ? [["floor", "Floor", LayoutGrid], ["design", "Floor designer", Copy], ["menu", "Price list", ListOrdered], ["reports", "Money", BarChart3], ["team", "Team", Users], ["brand", "Branding", Palette]]
     : [["floor", "Floor", LayoutGrid]];
   const currentTab = tabs.some((t) => t[0] === tab) ? tab : tabs[0][0];
@@ -2974,11 +2995,29 @@ export default function App() {
           )}
           {!isPlatform && loading && <Loader2 size={14} color={C.sageDim} className="animate-spin" />}
 
+          {isOwner && (
+            <button
+              onClick={() => { setServing(!serving); setTab("floor"); }}
+              title={serving ? "Back to running the bar" : "Work the floor without the admin tabs"}
+              style={{
+                display: "flex", alignItems: "center", gap: 7, padding: "7px 13px", borderRadius: 99,
+                cursor: "pointer", whiteSpace: "nowrap",
+                border: `1px solid ${serving ? C.brass : C.line}`,
+                background: serving ? C.a12 : "transparent",
+                color: serving ? C.brass : C.sage,
+                fontFamily: SANS, fontSize: 12.5, fontWeight: 600,
+              }}
+            >
+              {serving ? <LayoutList size={14} /> : <Martini size={14} />}
+              {serving ? "Manage" : "Serve"}
+            </button>
+          )}
+
           <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "5px 6px 5px 11px", borderRadius: 10, background: C.raise, border: `1px solid ${C.line}` }}>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: 12.5, fontWeight: 700, color: C.cream, lineHeight: 1.2 }}>{session.actorName}</div>
-              <div style={{ fontSize: 10, color: C.sageDim, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                {isPlatform ? "You" : isOwner ? "Bar owner" : "Waiter"}
+              <div style={{ fontSize: 10, color: serving ? C.brass : C.sageDim, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                {isPlatform ? "You" : isOwner ? (serving ? "Serving" : "Bar owner") : "Waiter"}
               </div>
             </div>
             <Btn size="sm" variant="bare" icon={LogOut} title="Sign out" onClick={doSignOut} />
