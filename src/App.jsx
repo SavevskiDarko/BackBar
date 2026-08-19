@@ -426,10 +426,41 @@ function AuthScreen({ platformName, pairedVenue, onPair, onUnpair, onPin, onPlat
             Your PIN is set by your bar's owner and only works here.
           </div>
         )}
+        <VersionLine />
       </div>
     </div>
   );
 }
+
+/* Which build is this device actually running? Without it, "have you got the
+   fix?" is unanswerable over the phone. Tapping it asks for a newer one. */
+function VersionLine() {
+  const [state, setState] = useState("idle");
+
+  const check = async () => {
+    setState("checking");
+    try {
+      const reg = await navigator.serviceWorker?.getRegistration();
+      await reg?.update();
+      setTimeout(() => setState("checked"), 900);
+    } catch {
+      setState("checked");
+    }
+  };
+
+  return (
+    <button onClick={check} style={{
+      display: "block", width: "100%", marginTop: 22, background: "transparent",
+      border: "none", cursor: "pointer", fontFamily: MONO, fontSize: 10.5,
+      color: C.sageDim, letterSpacing: "0.06em",
+    }}>
+      {state === "checking" ? "checking for updates…"
+        : state === "checked" ? `v${__BUILD_ID__} · up to date`
+        : `v${__BUILD_ID__} · tap to check for updates`}
+    </button>
+  );
+}
+
 const linkBtn = { background: "transparent", border: "none", color: C.sageDim, fontSize: 11.5, cursor: "pointer", fontFamily: SANS, textDecoration: "underline", textUnderlineOffset: 3 };
 
 /* ------------------------------------------------------------ floor drawing */
