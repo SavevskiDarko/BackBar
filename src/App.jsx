@@ -978,6 +978,9 @@ function Designer({ venue, zones, zoneId, setZoneId, orders, now, flash, actions
 function PriceList({ articles, currency, actions }) {
   const [q, setQ] = useState("");
   const [hover, setHover] = useState(null);
+  // A six-column table needs 440px before the name gets any width at all. On a
+  // phone that collapses the name to nothing, which is how it disappeared.
+  const narrow = useNarrow("(max-width: 620px)");
   const [cat, setCat] = useState("All");
   const [editing, setEditing] = useState(null);
   const cats = useMemo(() => ["All", ...Array.from(new Set(articles.map((a) => a.category)))], [articles]);
@@ -1037,7 +1040,8 @@ function PriceList({ articles, currency, actions }) {
       </div>
 
       <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 82px 82px 76px 40px", gap: 8, padding: "10px 14px", borderBottom: `1px solid ${C.line}`, background: C.raise }}>
+        <div style={{ display: narrow ? "none" : "grid", gridTemplateColumns: "minmax(0,1fr) 84px 84px 62px 74px 30px",
+          gap: 14, padding: "11px 18px", borderBottom: `1px solid ${C.line}`, background: C.raise }}>
           <Eyebrow>Article</Eyebrow>
           <Eyebrow style={{ textAlign: "right" }}>Buy {curOf(currency).sign}</Eyebrow>
           <Eyebrow style={{ textAlign: "right" }}>Sell {curOf(currency).sign}</Eyebrow>
@@ -1053,25 +1057,58 @@ function PriceList({ articles, currency, actions }) {
                 onClick={() => setEditing({ ...a })}
                 onMouseEnter={() => setHover(a.id)}
                 onMouseLeave={() => setHover(null)}
-                style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 84px 84px 62px 74px 30px", gap: 14,
-                  padding: "12px 18px", borderBottom: `1px solid ${C.lineFade}`,
-                  alignItems: "center", cursor: "pointer",
-                  background: hover === a.id ? C.raise : "transparent" }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontFamily: SANS, fontSize: 14, color: C.cream, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</div>
-                  <div style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim, marginTop: 2 }}>{a.category}</div>
-                </div>
-                <div style={{ fontFamily: MONO, fontSize: 13, textAlign: "right",
-                  color: a.cost > 0 ? C.sage : C.copper }}>
-                  {a.cost > 0 ? amount(a.cost, currency) : "—"}
-                </div>
-                <div style={{ fontFamily: MONO, fontSize: 13, color: C.cream, textAlign: "right" }}>{amount(a.price, currency)}</div>
-                <div style={{ textAlign: "right", fontFamily: MONO, fontSize: 12, color: C.sage }}>{(a.vatRate ?? 18)}%</div>
-                <div style={{ textAlign: "right", fontFamily: MONO, fontSize: 12,
-                  color: a.cost > 0 ? (m > 0.65 ? C.mint : m > 0.4 ? C.brass : C.copper) : C.sageDim }}>
-                  {a.cost > 0 ? `${(m * 100).toFixed(0)}%` : "—"}
-                </div>
-                <ChevronRight size={16} color={hover === a.id ? C.brass : C.sageDim} style={{ justifySelf: "end" }} />
+                style={narrow
+                  ? { padding: "12px 16px", borderBottom: `1px solid ${C.lineFade}`, cursor: "pointer",
+                      background: hover === a.id ? C.raise : "transparent" }
+                  : { display: "grid", gridTemplateColumns: "minmax(0,1fr) 84px 84px 62px 74px 30px", gap: 14,
+                      padding: "12px 18px", borderBottom: `1px solid ${C.lineFade}`,
+                      alignItems: "center", cursor: "pointer",
+                      background: hover === a.id ? C.raise : "transparent" }}>
+
+                {narrow ? (
+                  <>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+                      <span style={{ fontFamily: SANS, fontSize: 14.5, color: C.cream, minWidth: 0,
+                        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {a.name || "(no name)"}
+                      </span>
+                      <span style={{ fontFamily: MONO, fontSize: 15, color: C.cream, whiteSpace: "nowrap" }}>
+                        {amount(a.price, currency)}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginTop: 4 }}>
+                      <span style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>
+                        {a.category} · VAT {a.vatRate ?? 18}%
+                      </span>
+                      <span style={{ fontFamily: MONO, fontSize: 11.5,
+                        color: a.cost > 0 ? C.sage : C.copper, whiteSpace: "nowrap" }}>
+                        {a.cost > 0
+                          ? `buy ${amount(a.cost, currency)} · ${(m * 100).toFixed(0)}%`
+                          : "no buy price"}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontFamily: SANS, fontSize: 14, color: C.cream, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {a.name || "(no name)"}
+                      </div>
+                      <div style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim, marginTop: 2 }}>{a.category}</div>
+                    </div>
+                    <div style={{ fontFamily: MONO, fontSize: 13, textAlign: "right",
+                      color: a.cost > 0 ? C.sage : C.copper }}>
+                      {a.cost > 0 ? amount(a.cost, currency) : "—"}
+                    </div>
+                    <div style={{ fontFamily: MONO, fontSize: 13, color: C.cream, textAlign: "right" }}>{amount(a.price, currency)}</div>
+                    <div style={{ textAlign: "right", fontFamily: MONO, fontSize: 12, color: C.sage }}>{(a.vatRate ?? 18)}%</div>
+                    <div style={{ textAlign: "right", fontFamily: MONO, fontSize: 12,
+                      color: a.cost > 0 ? (m > 0.65 ? C.mint : m > 0.4 ? C.brass : C.copper) : C.sageDim }}>
+                      {a.cost > 0 ? `${(m * 100).toFixed(0)}%` : "—"}
+                    </div>
+                    <ChevronRight size={16} color={hover === a.id ? C.brass : C.sageDim} style={{ justifySelf: "end" }} />
+                  </>
+                )}
               </div>
             );
           })}
@@ -1101,10 +1138,12 @@ function PriceList({ articles, currency, actions }) {
               <Btn variant="danger" icon={Trash2} onClick={() => { actions.removeArticle(editing.id); setEditing(null); }} />
             )}
             <Btn variant="ghost" style={{ flex: 1 }} onClick={() => setEditing(null)}>Cancel</Btn>
-            <Btn variant="solid" icon={Check} style={{ flex: 1 }} onClick={() => {
+            <Btn variant="solid" icon={Check} style={{ flex: 1 }}
+              disabled={!editing.name.trim()}
+              onClick={() => {
               actions.saveArticle({
                 ...editing,
-                name: editing.name.trim() || "Untitled",
+                name: editing.name.trim(),
                 cost: round2(Number(editing.cost) || 0),
                 price: round2(Number(editing.price) || 0),
               });
@@ -1402,6 +1441,7 @@ function ProductsSold({ rows, loading, cur }) {
   const [sort, setSort] = useState("gross");
   const [dir, setDir] = useState(-1);
   const [q, setQ] = useState("");
+  const narrow = useNarrow("(max-width: 620px)");
 
   const shown = useMemo(() => {
     const f = q
@@ -1447,38 +1487,78 @@ function ProductsSold({ rows, loading, cur }) {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: GRID, gap: 14, padding: "10px 18px",
+      {/* Stacked on a phone: five numeric columns need 400px and a phone has 360. */}
+      <div style={{ display: "flex", gap: 14, padding: "10px 18px", flexWrap: "wrap",
         background: C.raise, borderBottom: `1px solid ${C.line}` }}>
-        {head("name", "Product", "left")}
-        {head("qty", "Sold")}
-        {head("gross", "Money")}
-        {head("profit", "Profit")}
-        {head("margin", "Margin")}
+        {narrow ? (
+          <>
+            <span style={{ fontFamily: SANS, fontSize: 10, fontWeight: 700, letterSpacing: "0.16em",
+              textTransform: "uppercase", color: C.sageDim, marginRight: "auto" }}>Sort by</span>
+            {head("qty", "Sold", "left")}
+            {head("gross", "Money", "left")}
+            {head("profit", "Profit", "left")}
+          </>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: GRID, gap: 14, width: "100%" }}>
+            {head("name", "Product", "left")}
+            {head("qty", "Sold")}
+            {head("gross", "Money")}
+            {head("profit", "Profit")}
+            {head("margin", "Margin")}
+          </div>
+        )}
       </div>
 
       <div style={{ maxHeight: 460, overflowY: "auto" }}>
         {shown.map((r, i) => (
-          <div key={i} style={{ display: "grid", gridTemplateColumns: GRID, gap: 14,
-            padding: "11px 18px", borderBottom: `1px solid ${C.lineFade}`, alignItems: "center" }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontFamily: SANS, fontSize: 13.5, color: C.cream, overflow: "hidden",
-                textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</div>
-              <div style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim, marginTop: 2 }}>
-                {r.category} · {Number(r.share || 0).toFixed(1)}% of takings
-              </div>
-            </div>
-            <span style={{ fontFamily: MONO, fontSize: 14, color: C.cream, textAlign: "right" }}>{r.qty}</span>
-            <span style={{ fontFamily: MONO, fontSize: 13, color: C.creamDim, textAlign: "right" }}>
-              {money(Number(r.gross) || 0, cur)}
-            </span>
-            <span style={{ fontFamily: MONO, fontSize: 13, textAlign: "right",
-              color: Number(r.cost) > 0 ? C.brass : C.sageDim }}>
-              {Number(r.cost) > 0 ? money(Number(r.profit) || 0, cur) : "—"}
-            </span>
-            <span style={{ fontFamily: MONO, fontSize: 12, textAlign: "right",
-              color: Number(r.cost) > 0 ? C.sage : C.sageDim }}>
-              {Number(r.cost) > 0 ? `${Number(r.margin || 0).toFixed(0)}%` : "—"}
-            </span>
+          <div key={i} style={narrow
+            ? { padding: "11px 18px", borderBottom: `1px solid ${C.lineFade}` }
+            : { display: "grid", gridTemplateColumns: GRID, gap: 14,
+                padding: "11px 18px", borderBottom: `1px solid ${C.lineFade}`, alignItems: "center" }}>
+            {narrow ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+                  <span style={{ fontFamily: SANS, fontSize: 14, color: C.cream, minWidth: 0,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</span>
+                  <span style={{ fontFamily: MONO, fontSize: 15, color: C.cream, whiteSpace: "nowrap" }}>
+                    {r.qty} <span style={{ fontSize: 11, color: C.sageDim }}>sold</span>
+                  </span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginTop: 4 }}>
+                  <span style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>
+                    {r.category} · {Number(r.share || 0).toFixed(1)}% of takings
+                  </span>
+                  <span style={{ fontFamily: MONO, fontSize: 12, color: C.creamDim, whiteSpace: "nowrap" }}>
+                    {money(Number(r.gross) || 0, cur)}
+                    {Number(r.cost) > 0 && (
+                      <span style={{ color: C.brass }}> · {money(Number(r.profit) || 0, cur)}</span>
+                    )}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontFamily: SANS, fontSize: 13.5, color: C.cream, overflow: "hidden",
+                    textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</div>
+                  <div style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim, marginTop: 2 }}>
+                    {r.category} · {Number(r.share || 0).toFixed(1)}% of takings
+                  </div>
+                </div>
+                <span style={{ fontFamily: MONO, fontSize: 14, color: C.cream, textAlign: "right" }}>{r.qty}</span>
+                <span style={{ fontFamily: MONO, fontSize: 13, color: C.creamDim, textAlign: "right" }}>
+                  {money(Number(r.gross) || 0, cur)}
+                </span>
+                <span style={{ fontFamily: MONO, fontSize: 13, textAlign: "right",
+                  color: Number(r.cost) > 0 ? C.brass : C.sageDim }}>
+                  {Number(r.cost) > 0 ? money(Number(r.profit) || 0, cur) : "—"}
+                </span>
+                <span style={{ fontFamily: MONO, fontSize: 12, textAlign: "right",
+                  color: Number(r.cost) > 0 ? C.sage : C.sageDim }}>
+                  {Number(r.cost) > 0 ? `${Number(r.margin || 0).toFixed(0)}%` : "—"}
+                </span>
+              </>
+            )}
           </div>
         ))}
         {!shown.length && !loading && (
@@ -1489,7 +1569,8 @@ function ProductsSold({ rows, loading, cur }) {
       </div>
 
       {shown.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: GRID, gap: 14, padding: "12px 18px",
+        <div style={{ display: narrow ? "flex" : "grid", justifyContent: narrow ? "space-between" : undefined,
+          gridTemplateColumns: narrow ? undefined : GRID, gap: 14, padding: "12px 18px",
           background: C.raise, borderTop: `1px solid ${C.line}` }}>
           <span style={{ fontFamily: SANS, fontSize: 12, fontWeight: 700, color: C.sage }}>
             {shown.length} product{shown.length > 1 ? "s" : ""}
