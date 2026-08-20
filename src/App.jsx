@@ -2986,6 +2986,16 @@ export default function App() {
     }
   }, [client, refresh, flash]);
 
+  const [securityEvents, setSecurityEvents] = useState([]);
+
+  const loadSecurity = useCallback(async () => {
+    if (!client || !venue || session?.role !== "owner") return;
+    try { setSecurityEvents(await api.securityEvents(client, venue.id)); }
+    catch { /* not critical enough to interrupt anyone */ }
+  }, [client, venue, session]);
+
+  useEffect(() => { if (tab === "team") loadSecurity(); }, [tab, loadSecurity]);
+
   const barActions = useMemo(() => ({
     saveTable: (zid, t) => guard((c) => api.upsertTable(c, venue.id, zid, t)),
     moveTable: (id, x, y) => api.moveTable(client, id, x, y).catch((e) => flash(e.message)),
@@ -3111,15 +3121,6 @@ export default function App() {
   }, [client, venue, refresh, flash]);
 
   const [drawer, setDrawer] = useState(null);
-  const [securityEvents, setSecurityEvents] = useState([]);
-
-  const loadSecurity = useCallback(async () => {
-    if (!client || !venue || session?.role !== "owner") return;
-    try { setSecurityEvents(await api.securityEvents(client, venue.id)); }
-    catch { /* not critical enough to interrupt anyone */ }
-  }, [client, venue, session]);
-
-  useEffect(() => { if (tab === "team") loadSecurity(); }, [tab, loadSecurity]);
 
   const refreshDrawer = useCallback(async () => {
     if (!client || !venue?.fiscalEnabled) return;
