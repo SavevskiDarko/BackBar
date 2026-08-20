@@ -24,7 +24,13 @@ begin
     'firstBill', (select min(closed_at) from bills where bar_id = p_bar),
     'lastBill',  (select max(closed_at) from bills where bar_id = p_bar),
     -- the reason a reset might not be a good idea
-    'fiscalReceipts', (select count(*) from bills where bar_id = p_bar and fiscal_receipt_no is not null),
+    -- Only receipts from a real device count. A SIMULATOR print is a rehearsal.
+    'fiscalReceipts', (select count(*) from bills where bar_id = p_bar
+                        and fiscal_receipt_no is not null
+                        and coalesce(fiscal_device, '') <> 'SIMULATOR'),
+    'simulatedReceipts', (select count(*) from bills where bar_id = p_bar
+                        and fiscal_receipt_no is not null
+                        and coalesce(fiscal_device, '') = 'SIMULATOR'),
     -- what survives, so the decision is made knowing it
     'articles',  (select count(*) from articles where bar_id = p_bar and active),
     'tables',    (select count(*) from tables   where bar_id = p_bar),
@@ -54,7 +60,8 @@ begin
   if p_confirm is distinct from v.name then raise exception 'confirmation_does_not_match'; end if;
 
   select count(*) into v_fiscal from bills
-   where bar_id = p_bar and fiscal_receipt_no is not null;
+   where bar_id = p_bar and fiscal_receipt_no is not null
+     and coalesce(fiscal_device, '') <> 'SIMULATOR';
 
   -- Only the platform may override, and only deliberately.
   if v_fiscal > 0 and not (p_force and is_platform()) then
@@ -67,6 +74,7 @@ begin
   values (p_bar, coalesce(nullif(jwt_staff_role(), ''), 'platform'),
           'bar_data_reset', v.name, v_summary);
 
+  delete from cash_movements     where bar_id = p_bar;
   delete from fiscal_day_reports where bar_id = p_bar;
   delete from fiscal_log         where bar_id = p_bar;
   delete from bills              where bar_id = p_bar;

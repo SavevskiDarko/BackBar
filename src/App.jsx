@@ -1886,7 +1886,7 @@ function Panel({ title, children, flex }) {
 /* Clearing a bar's practice runs before it opens for real. The list of what
    survives matters as much as what goes — an owner will not press this unless
    they can see their price list is safe. */
-function ResetDialog({ preview, cur, onCancel, onConfirm, busy }) {
+function ResetDialog({ preview, cur, onCancel, onConfirm, busy, canForce }) {
   const [typed, setTyped] = useState("");
   const blocked = (preview.fiscalReceipts || 0) > 0;
 
@@ -1925,18 +1925,32 @@ function ResetDialog({ preview, cur, onCancel, onConfirm, busy }) {
         </div>
       </div>
 
+      {(preview.simulatedReceipts || 0) > 0 && !blocked && (
+        <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim, marginBottom: 10, lineHeight: 1.5 }}>
+          {preview.simulatedReceipts} of these went to the simulator while testing. Those were
+          never fiscal records, so they don't stand in the way.
+        </div>
+      )}
+
       {blocked ? (
         <div style={{ display: "flex", gap: 10, padding: "12px 14px", borderRadius: 11,
           background: "rgba(212,103,74,0.1)", border: "1px solid rgba(212,103,74,0.35)" }}>
           <AlertTriangle size={15} color={C.copper} style={{ flexShrink: 0, marginTop: 1 }} />
           <span style={{ fontFamily: SANS, fontSize: 12.5, color: C.cream, lineHeight: 1.5 }}>
-            {preview.fiscalReceipts} bill{preview.fiscalReceipts > 1 ? "s carry" : " carries"} a fiscal
-            receipt number. Those are issued records with a retention period, so this bar is past
+            {preview.fiscalReceipts} bill{preview.fiscalReceipts > 1 ? "s were" : " was"} printed on a
+            real fiscal device. Those are issued records with a retention period, so this bar is past
             testing and can't be cleared.
+            {canForce && " Only you can override this, and it should be a deliberate decision."}
           </span>
         </div>
       ) : (
         <Field label={`Type ${preview.name} to confirm`} value={typed} onChange={setTyped} />
+      )}
+
+      {blocked && canForce && (
+        <div style={{ marginTop: 12 }}>
+          <Field label={`Type ${preview.name} to override`} value={typed} onChange={setTyped} />
+        </div>
       )}
 
       <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
@@ -1944,10 +1958,71 @@ function ResetDialog({ preview, cur, onCancel, onConfirm, busy }) {
         {!blocked && (
           <Btn variant="solid" icon={busy ? Loader2 : RotateCw} style={{ flex: 1 }}
             disabled={busy || typed !== preview.name}
-            onClick={() => onConfirm(typed)}>
+            onClick={() => onConfirm(typed, false)}>
             Clear and start
           </Btn>
         )}
+        {blocked && canForce && (
+          <Btn variant="danger" icon={busy ? Loader2 : AlertTriangle} style={{ flex: 1 }}
+            disabled={busy || typed !== preview.name}
+            onClick={() => onConfirm(typed, true)}>
+            Clear anyway
+          </Btn>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+/* Changing your own PIN. Requires the current one, so a borrowed unlocked
+   tablet can't be used to lock the real owner out. */
+function ChangePinDialog({ onCancel, onSave, busy }) {
+  const [cur, setCur] = useState("");
+  const [next, setNext] = useState("");
+  const [again, setAgain] = useState("");
+
+  const digits = (v) => v.replace(/\D/g, "").slice(0, 4);
+  const ready = cur.length === 4 && next.length === 4 && next === again && next !== cur;
+
+  return (
+    <Modal onClose={onCancel} width={360}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+        <KeyRound size={19} color={C.brass} />
+        <span style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 17 }}>
+          Change your PIN
+        </span>
+      </div>
+      <div style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim, marginBottom: 16, lineHeight: 1.5 }}>
+        Pick something nobody else knows. PINs are stored scrambled, so once you
+        change it nobody can read it back — not your provider either.
+      </div>
+
+      <div style={{ display: "grid", gap: 12 }}>
+        <Field label="Current PIN" value={cur} onChange={(v) => setCur(digits(v))} mono maxLength={4} />
+        <Field label="New PIN" value={next} onChange={(v) => setNext(digits(v))} mono maxLength={4} />
+        <Field label="New PIN again" value={again} onChange={(v) => setAgain(digits(v))} mono maxLength={4} />
+      </div>
+
+      {again.length === 4 && next !== again && (
+        <div style={{ fontFamily: SANS, fontSize: 12, color: C.copper, marginTop: 8 }}>
+          The two new PINs don't match.
+        </div>
+      )}
+
+      <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim, marginTop: 14, lineHeight: 1.55,
+        background: C.ink, border: `1px solid ${C.line}`, borderRadius: 10, padding: 12 }}>
+        Worth knowing what this does and doesn't do. It stops anyone signing in
+        as you — including whoever set up your bar. It is not encryption: your
+        provider still hosts the database and can reach what is in it, the same
+        as any other software company running a service for you.
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+        <Btn variant="ghost" style={{ flex: 1 }} onClick={onCancel}>Cancel</Btn>
+        <Btn variant="solid" icon={busy ? Loader2 : Check} style={{ flex: 1 }}
+          disabled={busy || !ready} onClick={() => onSave(cur, next)}>
+          Change it
+        </Btn>
       </div>
     </Modal>
   );
@@ -1973,7 +2048,7 @@ function Notice({ tone, icon: Icon, children }) {
   );
 }
 
-function Team({ venue, staff: allStaff, flash, actions }) {
+function Team({ venue, staff: allStaff, events, flash, actions }) {
   const [editing, setEditing] = useState(null);
   const [issued, setIssued] = useState(null);
   const [deleting, setDeleting] = useState(null);   // { bar, preview }
@@ -1983,6 +2058,7 @@ function Team({ venue, staff: allStaff, flash, actions }) {
   // Never list the owner here — deleting that row would lock them out of
   // their own bar. The database refuses it too, but it shouldn't be offered.
   const staff = (allStaff || []).filter((s) => s.role !== "owner");
+  const [changing, setChanging] = useState(false);
   const plan = PLANS[venue.subscription.plan];
 
   // The database rejects a PIN already used at this bar, so we don't duplicate
@@ -2051,6 +2127,35 @@ function Team({ venue, staff: allStaff, flash, actions }) {
         )}
       </div>
 
+      {(events || []).length > 0 && (
+        <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16, marginBottom: 16 }}>
+          <Eyebrow style={{ marginBottom: 4 }}>Recent sign-in changes</Eyebrow>
+          <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim, marginBottom: 10, lineHeight: 1.45 }}>
+            Every PIN reset is recorded, including any made by your provider.
+          </div>
+          <div style={{ display: "grid", gap: 7 }}>
+            {events.slice(0, 5).map((e, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12,
+                fontFamily: SANS, fontSize: 12.5, color: C.sage }}>
+                <span>
+                  {{
+                    owner_pin_reset: "Owner PIN reset",
+                    staff_pin_reset: "Waiter PIN reset",
+                    own_pin_changed: "PIN changed",
+                    bar_data_reset: "Trading data cleared",
+                  }[e.event] || e.event}
+                  {e.subject ? ` · ${e.subject}` : ""}
+                  <span style={{ color: C.sageDim }}> — by {e.actor}</span>
+                </span>
+                <span style={{ fontFamily: MONO, fontSize: 11.5, color: C.sageDim, whiteSpace: "nowrap" }}>
+                  {shortDate(Date.parse(e.at))}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <div style={{ flex: 1, minWidth: 200 }}>
           <div style={{ fontFamily: SANS, fontSize: 14, color: C.cream, fontWeight: 600 }}>Let waiters give discounts</div>
@@ -2066,6 +2171,14 @@ function Team({ venue, staff: allStaff, flash, actions }) {
           }} />
         </button>
       </div>
+
+      {changing && (
+        <ChangePinDialog busy={false} onCancel={() => setChanging(false)}
+          onSave={async (cur, next) => {
+            const ok = await actions.changeOwnPin(cur, next);
+            if (ok) setChanging(false);
+          }} />
+      )}
 
       {issued && (
         <Modal onClose={() => setIssued(null)} width={340}>
@@ -2452,11 +2565,11 @@ function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loadi
 
       {resetting && (
         <ResetDialog
-          preview={resetting.preview} cur={resetting.bar.currency} busy={resetBusy}
+          preview={resetting.preview} cur={resetting.bar.currency} busy={resetBusy} canForce
           onCancel={() => setResetting(null)}
-          onConfirm={async (confirm) => {
+          onConfirm={async (confirm, force) => {
             setResetBusy(true);
-            const ok = await actions.resetBar(resetting.bar, confirm);
+            const ok = await actions.resetBar(resetting.bar, confirm, force);
             setResetBusy(false);
             if (ok) setResetting(null);
           }}
@@ -2885,6 +2998,11 @@ export default function App() {
     resetStaffPin: (id) => guard((c) => api.resetStaffPin(c, id)),
     removeStaff: (id) => guard((c) => api.deactivateStaff(c, id)),
     setDiscountPolicy: (v) => guard((c) => api.setDiscountPolicy(c, venue.id, v)),
+    changeOwnPin: async (cur, next) => {
+      const ok = await guard((c) => api.changeOwnPin(c, cur, next), "PIN changed — use the new one next time");
+      if (ok) loadSecurity();
+      return ok;
+    },
     saveBranding: (b) => guard((c) => api.setBranding(c, venue.id, b)),
     saveFiscal: (cfg) => guard((c) => api.setFiscalConfig(c, venue.id, cfg), "Printer settings saved"),
     uploadLogo: async (file) => {
@@ -2896,7 +3014,7 @@ export default function App() {
       await api.removeLogo(c, venue.id, venue.logoPath);
       setLogoStamp(Date.now());
     }),
-  }), [guard, client, venue, flash]);
+  }), [guard, client, venue, flash, loadSecurity]);
 
   /* ---- orders: these are the writes that must survive a dead connection ---- */
 
@@ -2993,6 +3111,15 @@ export default function App() {
   }, [client, venue, refresh, flash]);
 
   const [drawer, setDrawer] = useState(null);
+  const [securityEvents, setSecurityEvents] = useState([]);
+
+  const loadSecurity = useCallback(async () => {
+    if (!client || !venue || session?.role !== "owner") return;
+    try { setSecurityEvents(await api.securityEvents(client, venue.id)); }
+    catch { /* not critical enough to interrupt anyone */ }
+  }, [client, venue, session]);
+
+  useEffect(() => { if (tab === "team") loadSecurity(); }, [tab, loadSecurity]);
 
   const refreshDrawer = useCallback(async () => {
     if (!client || !venue?.fiscalEnabled) return;
@@ -3177,7 +3304,7 @@ export default function App() {
       resetOwnerPin: (v) => run(() => api.resetOwnerPin(v.id)),
       deletePreview: (v) => api.barDeletePreview(v.id).catch((e) => { flash(e.message); return null; }),
       resetPreview: (v) => api.platformResetPreview(v.id).catch((e) => { flash(e.message); return null; }),
-      resetBar: (v, confirm) => run(() => api.platformResetBar(v.id, confirm), `${v.name} cleared`),
+      resetBar: (v, confirm, force) => run(() => api.platformResetBar(v.id, confirm, force), `${v.name} cleared`),
       deleteBar: (v, confirm) => run(() => api.deleteBar(v.id, confirm, v.logoPath), `${v.name} deleted`),
       toggleSuspend: (v) => run(
         () => api.setSuspended(v.id, !v.subscription.suspended),
@@ -3475,7 +3602,7 @@ export default function App() {
           />
         )}
         {isOwner && currentTab === "team" && (
-          <Team venue={venue} staff={data.staff || []} flash={flash} actions={barActions} />
+          <Team venue={venue} staff={data.staff || []} events={securityEvents} flash={flash} actions={barActions} />
         )}
         {isOwner && currentTab === "brand" && (
           <Branding venue={venue} flash={flash} actions={barActions} />
@@ -3497,7 +3624,7 @@ export default function App() {
 
       {resetPreview && (
         <ResetDialog
-          preview={resetPreview} cur={venue?.currency} busy={resetBusy}
+          preview={resetPreview} cur={venue?.currency} busy={resetBusy} canForce={false}
           onCancel={() => setResetPreview(null)} onConfirm={doReset}
         />
       )}

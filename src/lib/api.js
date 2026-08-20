@@ -27,6 +27,8 @@ function friendly(msg = "") {
   if (msg.includes("confirmation_does_not_match")) return "The name you typed doesn't match.";
   if (msg.includes("article_not_on_this_bars_list")) return "That item isn't on this bar's price list.";
   if (msg.includes("must keep one active owner")) return "A bar must keep one active owner.";
+  if (msg.includes("current_pin_wrong")) return "That isn't your current PIN.";
+  if (msg.includes("pin_unchanged")) return "The new PIN is the same as the old one.";
   if (msg.includes("payments_do_not_match_total"))
     return "The split doesn't add up to the bill total.";
   if (msg.includes("has_fiscal_receipts"))
@@ -233,6 +235,17 @@ export async function loadProductsSold(client, barId, from, to) {
   return unwrap(await client.rpc("bar_products_sold", {
     p_bar: barId, p_from: from, p_to: to,
   }));
+}
+
+/** Change your own PIN. Requires the current one — a session token alone must
+    not be enough to lock the real owner out of their bar. */
+export async function changeOwnPin(client, currentPin, newPin) {
+  unwrap(await client.rpc("change_own_pin", { p_current: currentPin, p_new: newPin }));
+}
+
+/** Who has touched sign-in for this bar, and when. */
+export async function securityEvents(client, barId) {
+  return unwrap(await client.rpc("bar_security_events", { p_bar: barId, p_limit: 10 }));
 }
 
 export async function resetOwnerPin(barId, pin) {
