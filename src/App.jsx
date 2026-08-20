@@ -3,7 +3,7 @@ import {
   LayoutGrid, Store, BarChart3, Plus, Minus, Trash2, X, Check, Circle, Square,
   RectangleHorizontal, Users, Clock, CreditCard, Banknote, Search, ChevronRight,
   Copy, Save, Receipt, RotateCw, Loader2, Wine, ListOrdered, LogOut, Delete,
-  ChevronLeft, Palette, ImageIcon, Printer, Martini, LayoutList,
+  ChevronLeft, Palette, ImageIcon, Printer, Martini, LayoutList, CalendarClock,
   ShieldCheck, UserPlus, AlertTriangle, ArrowLeft, KeyRound, Pause, Play, Wallet,
 } from "lucide-react";
 
@@ -613,6 +613,9 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
   const [q, setQ] = useState("");
   const [paying, setPaying] = useState(false);
   const [discount, setDiscount] = useState(0);
+  // Part cash, part card is ordinary in a bar. Null means a single tender.
+  const [split, setSplit] = useState(null);      // { cash, card }
+  const [customer, setCustomer] = useState(null); // { taxId, name }
   const narrow = useNarrow();
   const [showBill, setShowBill] = useState(false);
 
@@ -809,11 +812,59 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
                     </div>
                   )}
                   <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.16em", color: "#8A7F66", marginBottom: 7 }}>DID THEY PAY?</div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <Btn variant="quiet" disabled={busy} icon={Banknote} onClick={() => onSettle("cash", true, discount)} style={{ flex: 1, background: "#221E15", color: C.cream, borderColor: "#221E15" }}>Cash</Btn>
-                    <Btn variant="solid" disabled={busy} icon={CreditCard} onClick={() => onSettle("card", true, discount)} style={{ flex: 1 }}>Card</Btn>
-                  </div>
-                  <Btn variant="ghost" disabled={busy} icon={AlertTriangle} onClick={() => onSettle(null, false, discount)}
+
+                  {split === null ? (
+                    <>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <Btn variant="quiet" disabled={busy} icon={Banknote}
+                          onClick={() => onSettle("cash", true, discount, null, customer)}
+                          style={{ flex: 1, background: "#221E15", color: C.cream, borderColor: "#221E15" }}>Cash</Btn>
+                        <Btn variant="solid" disabled={busy} icon={CreditCard}
+                          onClick={() => onSettle("card", true, discount, null, customer)}
+                          style={{ flex: 1 }}>Card</Btn>
+                      </div>
+                      <Btn variant="bare" onClick={() => setSplit({ cash: round2(total / 2), card: round2(total - round2(total / 2)) })}
+                        style={{ width: "100%", marginTop: 6, color: "#6B6250" }}>
+                        Split between cash and card
+                      </Btn>
+                    </>
+                  ) : (
+                    <SplitTender
+                      total={total} cur={venue.currency} split={split} setSplit={setSplit}
+                      busy={busy}
+                      onCancel={() => setSplit(null)}
+                      onConfirm={() => onSettle(null, true, discount,
+                        [{ method: "cash", amount: split.cash }, { method: "card", amount: split.card }],
+                        customer)}
+                    />
+                  )}
+
+                  {/* A business customer needs their tax number on the receipt,
+                      or their accountant cannot claim it. */}
+                  {customer === null ? (
+                    <Btn variant="bare" onClick={() => setCustomer({ taxId: "", name: "" })}
+                      style={{ width: "100%", marginTop: 4, color: "#6B6250" }}>
+                      Company receipt (ЕДБ)
+                    </Btn>
+                  ) : (
+                    <div style={{ marginTop: 10, padding: 10, borderRadius: 9, background: "rgba(0,0,0,0.05)", border: "1px dashed rgba(0,0,0,0.2)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: "0.16em", color: "#8A7F66" }}>BUYER</span>
+                        <button onClick={() => setCustomer(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#6B6250", padding: 0 }}>
+                          <X size={14} />
+                        </button>
+                      </div>
+                      <input value={customer.taxId} placeholder="ЕДБ (13 digits)" inputMode="numeric"
+                        onChange={(e) => setCustomer({ ...customer, taxId: e.target.value.replace(/\D/g, "").slice(0, 13) })}
+                        style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1px solid rgba(0,0,0,0.2)",
+                          background: C.cream, color: "#221E15", fontFamily: MONO, fontSize: 13, outline: "none", marginBottom: 6 }} />
+                      <input value={customer.name} placeholder="Company name"
+                        onChange={(e) => setCustomer({ ...customer, name: e.target.value })}
+                        style={{ width: "100%", padding: "8px 10px", borderRadius: 7, border: "1px solid rgba(0,0,0,0.2)",
+                          background: C.cream, color: "#221E15", fontFamily: SANS, fontSize: 13, outline: "none" }} />
+                    </div>
+                  )}
+                  <Btn variant="ghost" disabled={busy} icon={AlertTriangle} onClick={() => onSettle(null, false, discount, null, null)}
                     style={{ width: "100%", marginTop: 8, color: "#8A5A2E", borderColor: "rgba(0,0,0,0.2)" }}>
                     Not paid — leave on the tab
                   </Btn>
@@ -823,6 +874,53 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* Two amounts that must add to the bill. Editing one moves the other, because
+   a split that does not reconcile is a drawer that will not reconcile either —
+   and the database refuses it anyway. */
+function SplitTender({ total, cur, split, setSplit, onCancel, onConfirm, busy }) {
+  const setCash = (v) => {
+    const cash = clamp(round2(Number(v) || 0), 0, total);
+    setSplit({ cash, card: round2(total - cash) });
+  };
+  const ok = Math.abs(split.cash + split.card - total) < 0.01;
+
+  const box = {
+    width: "100%", padding: "9px 10px", borderRadius: 8, textAlign: "right",
+    border: "1px solid rgba(0,0,0,0.2)", background: C.cream, color: "#221E15",
+    fontFamily: MONO, fontSize: 15, outline: "none",
+  };
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <div>
+          <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: "0.14em", color: "#8A7F66", marginBottom: 4 }}>CASH</div>
+          <input type="number" inputMode="decimal" value={split.cash} style={box}
+            onChange={(e) => setCash(e.target.value)} />
+        </div>
+        <div>
+          <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: "0.14em", color: "#8A7F66", marginBottom: 4 }}>CARD</div>
+          <input type="number" inputMode="decimal" value={split.card} style={box}
+            onChange={(e) => setCash(total - (Number(e.target.value) || 0))} />
+        </div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8,
+        fontFamily: MONO, fontSize: 11.5, color: ok ? "#6B6250" : C.copper }}>
+        <span>of {money(total, cur)}</span>
+        <span>{ok ? "adds up" : `off by ${money(Math.abs(split.cash + split.card - total), cur)}`}</span>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+        <Btn variant="bare" onClick={onCancel} style={{ flex: 1, color: "#6B6250" }}>Back</Btn>
+        <Btn variant="solid" disabled={busy || !ok} onClick={onConfirm} icon={Receipt} style={{ flex: 2 }}>
+          Take {money(split.cash, cur)} cash
+        </Btn>
       </div>
     </div>
   );
@@ -1279,7 +1377,8 @@ function SplitList({ rows, cur, nameKey = "name", valueKey = "gross", sub }) {
   );
 }
 
-function Reports({ venue, report, products, productsLoading, loading, mode, setMode, anchor, setAnchor, unpaid, onSettleUnpaid, onExport, exporting, actions, onTestPrinter, onRetryFiscal, onReset }) {
+function Reports({ venue, report, products, productsLoading, loading, mode, setMode, anchor, setAnchor, unpaid, onSettleUnpaid, onExport, exporting, actions, onTestPrinter, onRetryFiscal, onReset,
+  drawer, onCash, onDrawer, onX, onZ }) {
   const cur = venue.currency;
   const t = report?.totals || {};
   const prev = report?.previous || {};
@@ -1424,7 +1523,8 @@ function Reports({ venue, report, products, productsLoading, loading, mode, setM
       <ProductsSold rows={products} loading={productsLoading} cur={cur} />
 
       <FiscalPanel venue={venue} actions={actions} onTest={onTestPrinter}
-        onRetryAll={onRetryFiscal} stuck={att.noFiscal || 0} />
+        onRetryAll={onRetryFiscal} stuck={att.noFiscal || 0}
+        drawer={drawer} onCash={onCash} onDrawer={onDrawer} onX={onX} onZ={onZ} />
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16, padding: "14px 18px",
         background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, flexWrap: "wrap" }}>
@@ -1637,7 +1737,7 @@ function ProductsSold({ rows, loading, cur }) {
   );
 }
 
-function FiscalPanel({ venue, actions, onTest, onRetryAll, stuck }) {
+function FiscalPanel({ venue, actions, onTest, onRetryAll, stuck, drawer, onCash, onDrawer, onX, onZ }) {
   const [open, setOpen] = useState(false);
   const [cfg, setCfg] = useState({
     enabled: venue.fiscalEnabled || false,
@@ -1721,6 +1821,38 @@ function FiscalPanel({ venue, actions, onTest, onRetryAll, stuck }) {
             <Btn variant="solid" icon={Check} style={{ marginLeft: "auto" }}
               onClick={() => actions.saveFiscal(cfg)}>Save</Btn>
           </div>
+
+          {venue.fiscalEnabled && venue.fiscalBridgeUrl && (
+            <div style={{ borderTop: `1px solid ${C.line}`, paddingTop: 14, marginTop: 4 }}>
+              <Eyebrow style={{ marginBottom: 4 }}>The till</Eyebrow>
+              <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim, marginBottom: 10, lineHeight: 1.5 }}>
+                X reads the day so far and leaves it open. Z ends the day — only
+                run it when you have finished trading.
+              </div>
+
+              {drawer && (
+                <div style={{ background: C.ink, border: `1px solid ${C.line}`, borderRadius: 10,
+                  padding: "10px 12px", marginBottom: 10, fontFamily: MONO, fontSize: 12.5, color: C.sage }}>
+                  <Row2 a="cash taken" b={money(Number(drawer.cashSales) || 0, venue.currency)} />
+                  <Row2 a="paid in" b={money(Number(drawer.paidIn) || 0, venue.currency)} />
+                  <Row2 a="paid out" b={money(Number(drawer.paidOut) || 0, venue.currency)} />
+                  <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 6, paddingTop: 6 }}>
+                    <Row2 a="should be in the drawer" b={money(Number(drawer.expected) || 0, venue.currency)} />
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Btn icon={Wallet} onClick={() => onCash("in")}>Cash in</Btn>
+                <Btn icon={Wallet} onClick={() => onCash("out")}>Cash out</Btn>
+                <Btn icon={Banknote} onClick={onDrawer}>Open drawer</Btn>
+                <Btn variant="ghost" icon={BarChart3} onClick={onX}>X report</Btn>
+                <Btn variant="danger" icon={CalendarClock} onClick={onZ} style={{ marginLeft: "auto" }}>
+                  Close the day (Z)
+                </Btn>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -2778,7 +2910,7 @@ export default function App() {
     finally { setSheetBusy(false); }
   };
 
-  const settleOrder = async (method, paid, discount) => {
+  const settleOrder = async (method, paid, discount, payments, customer) => {
     if (!openOrder) return flash("Save the order before closing it.");
     setSheetBusy(true);
     const billId = crypto.randomUUID();
@@ -2786,8 +2918,8 @@ export default function App() {
     try {
       const res = await write(
         "order.close",
-        { orderId: openOrder.id, billId, method, paid, discount },
-        (c) => api.closeBill(c, { orderId: openOrder.id, billId, method, paid, discount })
+        { orderId: openOrder.id, billId, method, paid, discount, payments, customer },
+        (c) => api.closeBill(c, { orderId: openOrder.id, billId, method, paid, discount, payments, customer })
       );
       setOpenTableId(null);
       const tail = res === "queued" ? " (will sync)" : "";
@@ -2844,6 +2976,65 @@ export default function App() {
     finally { setResetBusy(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client, venue, refresh, flash]);
+
+  const [drawer, setDrawer] = useState(null);
+
+  const refreshDrawer = useCallback(async () => {
+    if (!client || !venue?.fiscalEnabled) return;
+    try { setDrawer(await api.cashInDrawer(client, venue.id)); } catch { /* not critical */ }
+  }, [client, venue]);
+
+  /* Money into or out of the drawer. It is recorded on the device first — the
+     printed slip is the legal record — and only then in our own books, so we
+     never claim a movement the device never saw. */
+  const doCash = useCallback(async (kind) => {
+    const label = kind === "in" ? "Cash in — how much?" : "Cash out — how much?";
+    const raw = window.prompt(label);
+    if (raw === null) return;
+    const amount = Number(String(raw).replace(",", "."));
+    if (!(amount > 0)) return flash("Enter an amount greater than zero");
+    const reason = window.prompt("What is it for? (optional)") || null;
+
+    try {
+      let ref = null;
+      if (venue.fiscalBridgeUrl) {
+        const r = await fiscal.cashMovement(venue.fiscalBridgeUrl, {
+          kind, movementId: crypto.randomUUID(), amount, reason, currency: venue.currency,
+        }, venue.fiscalBridgeToken);
+        ref = r.receiptNo || null;
+      }
+      await api.recordCashMovement(client, venue.id, { kind, amount, reason, fiscalRef: ref });
+      await refreshDrawer();
+      flash(`${kind === "in" ? "Paid in" : "Paid out"} ${money(amount, venue.currency)}`);
+    } catch (e) { flash(e.message); }
+  }, [client, venue, flash, refreshDrawer]);
+
+  const doDrawer = useCallback(async () => {
+    try {
+      await fiscal.openDrawer(venue.fiscalBridgeUrl, "change", venue.fiscalBridgeToken);
+    } catch (e) { flash(e.message); }
+  }, [venue, flash]);
+
+  const doXReport = useCallback(async () => {
+    try {
+      await fiscal.xReport(venue.fiscalBridgeUrl, venue.fiscalBridgeToken);
+      await refreshDrawer();
+      flash("X report printed — the day is still open");
+    } catch (e) { flash(e.message); }
+  }, [venue, flash, refreshDrawer]);
+
+  /* Z ends the day on the device and cannot be undone, so it asks first. */
+  const doZReport = useCallback(async () => {
+    if (!window.confirm("Close the day on the printer? This ends trading and can't be undone.")) return;
+    try {
+      const r = await fiscal.zReport(venue.fiscalBridgeUrl, venue.fiscalBridgeToken);
+      await api.closeBusinessDay(client, venue.id, r.zNumber, r.device).catch(() => {});
+      await refreshDrawer();
+      flash(`Day closed — Z ${r.zNumber}`);
+    } catch (e) { flash(e.message); }
+  }, [client, venue, flash, refreshDrawer]);
+
+  useEffect(() => { if (tab === "reports") refreshDrawer(); }, [tab, refreshDrawer]);
 
   const testPrinter = useCallback(async (cfg) => {
     try {
@@ -3264,7 +3455,8 @@ export default function App() {
             unpaid={unpaid} onSettleUnpaid={settleUnpaid}
             onExport={exportCsv} exporting={exporting}
             actions={barActions} onTestPrinter={testPrinter} onRetryFiscal={retryFiscal}
-            onReset={openReset}
+            onReset={openReset} drawer={drawer} onCash={doCash} onDrawer={doDrawer}
+            onX={doXReport} onZ={doZReport}
           />
         )}
         {isOwner && currentTab === "team" && (

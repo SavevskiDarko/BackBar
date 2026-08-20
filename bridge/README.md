@@ -12,6 +12,16 @@ Because it sits on the LAN, receipts still print when the internet is down.
 That's the failure that actually happens, and the one that matters: a cash sale
 needs its receipt at the moment of payment.
 
+## See what the receipt looks like
+
+Start the bridge in simulator mode, then open **`http://<this-machine's-LAN-ip>:8377/receipts`**
+in a browser — on the tablet, next to the app.
+
+Every bill you close appears there as paper, refreshing every three seconds.
+It is how you show a bar owner what their guests will be handed, before any
+printer exists. Simulated documents are marked as such so nobody mistakes one
+for a fiscal receipt.
+
 ## Try it with no printer at all
 
 ```bash

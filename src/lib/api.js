@@ -27,6 +27,8 @@ function friendly(msg = "") {
   if (msg.includes("confirmation_does_not_match")) return "The name you typed doesn't match.";
   if (msg.includes("article_not_on_this_bars_list")) return "That item isn't on this bar's price list.";
   if (msg.includes("must keep one active owner")) return "A bar must keep one active owner.";
+  if (msg.includes("payments_do_not_match_total"))
+    return "The split doesn't add up to the bill total.";
   if (msg.includes("has_fiscal_receipts"))
     return "Some bills already have fiscal receipts. Those are issued records and can't be cleared.";
   if (msg.includes("Billing settings")) return "Only the platform can change billing.";
@@ -85,7 +87,7 @@ export async function cancelOrder(client, orderId) {
 /** Close a bill. The bill id is generated here for the same reason as the
     order id: a replayed close must return the existing bill rather than
     billing the table twice. */
-export async function closeBill(client, { orderId, billId, method, paid, discount = 0 }) {
+export async function closeBill(client, { orderId, billId, method, paid, discount = 0, payments, customer }) {
   return mapBill(
     unwrap(
       await client.rpc("close_order_and_bill", {
@@ -94,9 +96,31 @@ export async function closeBill(client, { orderId, billId, method, paid, discoun
         p_paid: paid,
         p_discount: discount,
         p_bill: billId || crypto.randomUUID(),
+        p_payments: paid && payments?.length > 1 ? payments : null,
+        p_customer: customer?.taxId ? customer : null,
       })
     )
   );
+}
+
+export async function recordCashMovement(client, barId, { kind, amount, reason, fiscalRef }) {
+  return unwrap(await client.rpc("record_cash_movement", {
+    p_bar: barId, p_kind: kind, p_amount: amount,
+    p_reason: reason || null, p_fiscal_ref: fiscalRef || null,
+  }));
+}
+
+/** What should physically be in the drawer right now. */
+/** Records the device's Z number against our own daily totals, so the owner's
+    figures can be reconciled against the printer's. */
+export async function closeBusinessDay(client, barId, zNumber, device) {
+  return unwrap(await client.rpc("close_business_day", {
+    p_bar: barId, p_z_number: zNumber || null, p_device: device || null,
+  }));
+}
+
+export async function cashInDrawer(client, barId) {
+  return unwrap(await client.rpc("cash_in_drawer", { p_bar: barId, p_day: null }));
 }
 
 /* The outbox replays through these, so their shape must match what

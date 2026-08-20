@@ -38,6 +38,12 @@ nothing above it changes.
 
 ## Endpoints
 
+Nine in total. The four core ones, plus five added after review by a Macedonian
+fiscal operator — X report, split payments, buyer tax number, cash drawer, and
+cash in/out. Those five are what separates a demo from something a real
+угостителски објект can trade on.
+
+
 Base URL is per bar, e.g. `http://192.168.1.50:8usb0`. Configure it per device.
 
 ### `GET /fiscal/status`
@@ -71,6 +77,11 @@ The body is exactly what `fiscal_payload(bill_id)` returns:
   "staff": "Ana",
   "closedAt": "2026-08-17T21:14:03Z",
   "method": "cash",
+  "payments": [
+    { "method": "cash", "amount": 790.00 },
+    { "method": "card", "amount": 500.00 }
+  ],
+  "customer": { "taxId": "4030000000000", "name": "Kompanija DOOEL" },
   "discount": 0,
   "total": 1290.00,
   "vat": [
@@ -106,6 +117,51 @@ handle it.
 `retryable: false` means the app stops retrying and flags the bill for the owner
 instead of hammering a printer that will keep refusing.
 
+**`payments` is always an array**, even when there is a single tender — one
+shape to implement rather than two. The amounts are guaranteed by the database
+to sum to `total`; a split that does not reconcile is rejected before it ever
+reaches you. `method` is still present and holds the largest tender, for
+anything that only understands one.
+
+**`customer` is present only when the guest asked for a company receipt.** When
+it is there the buyer's ЕДБ must appear on the fiscal document, or their
+accountant cannot claim it.
+
+### `POST /fiscal/x-report`
+
+Reads the day so far and **leaves it open**. Bars check the till mid-shift, and
+that must never risk closing the day by accident — which is why this is a
+separate call from Z rather than a flag on it.
+
+```json
+{ "ok": true, "type": "x", "closedDay": false, "device": "FP-2000-1234567" }
+```
+
+### `POST /fiscal/open-drawer`
+
+```json
+{ "reason": "change" }
+```
+
+Pulses the drawer over RJ11/RJ12 with no sale attached — a waiter giving change
+or taking a deposit. Returns `{ "ok": true }`.
+
+### `POST /fiscal/cash-in` and `POST /fiscal/cash-out`
+
+```json
+{ "movementId": "b71c…", "amount": 2000.00, "reason": "opening float", "currency": "MKD" }
+```
+
+The opening float has to be registered on the device at the start of a shift,
+and anything removed during it recorded. Returns the document number:
+
+```json
+{ "ok": true, "receiptNo": "C000042", "device": "FP-2000-1234567" }
+```
+
+**`movementId` is an idempotency key, exactly as `billId` is for a receipt.** A
+retried float must not double the drawer. Same rule, same reason.
+
 ### `POST /fiscal/void`
 
 ```json
@@ -117,7 +173,8 @@ Issues the storno document (касова сметка за сторна тран
 
 ### `POST /fiscal/z-report`
 
-Closes the business day on the device. Returns:
+**Ends** the business day on the device — the counterpart to X, and not
+reversible. Returns:
 
 ```json
 { "ok": true, "zNumber": "0231", "total": 48310.00, "device": "FP-2000-1234567" }
@@ -139,6 +196,13 @@ guests on it.
   HTTP on a trusted VLAN. Discuss with whoever installs it.
 
 ## What Backbar does around this
+
+- `bills.payments` holds the split; the database refuses one that does not sum
+  to the total, so you never receive an unbalanced tender
+- `bills.customer_tax_id` holds the buyer's ЕДБ
+- `cash_movements` records every float in and out, and `cash_in_drawer()`
+  returns what should physically be in the till right now — cash sales plus
+  paid in, minus paid out
 
 - `bills.fiscal_status` moves `pending` → `sent`, or `failed` with the message
 - `mark_bill_fiscalised()` stores the receipt number; it is idempotent too, so a

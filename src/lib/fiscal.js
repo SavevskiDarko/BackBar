@@ -48,5 +48,20 @@ export const printReceipt = (baseUrl, payload, token) =>
 export const voidReceipt = (baseUrl, { billId, receiptNo, reason }, token) =>
   call(baseUrl, "/fiscal/void", { billId, receiptNo, reason }, token);
 
+/* Reads the day so far and leaves it open. Every bar checks the till mid-shift;
+   only a Z report ends the day, and ending it by accident is a real problem —
+   so they are deliberately separate calls. */
+export const xReport = (baseUrl, token) =>
+  call(baseUrl, "/fiscal/x-report", {}, token);
+
 export const zReport = (baseUrl, token) =>
   call(baseUrl, "/fiscal/z-report", {}, token);
+
+/** Give change without a sale attached. */
+export const openDrawer = (baseUrl, reason, token) =>
+  call(baseUrl, "/fiscal/open-drawer", { reason }, token);
+
+/** The shift float, and anything taken out. movementId is the idempotency key
+    exactly as billId is for a receipt — a retried float must not double. */
+export const cashMovement = (baseUrl, { kind, movementId, amount, reason, currency }, token) =>
+  call(baseUrl, `/fiscal/cash-${kind}`, { movementId, amount, reason, currency }, token);
