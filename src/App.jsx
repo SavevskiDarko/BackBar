@@ -1759,8 +1759,13 @@ function FiscalPanel({ venue, actions, onTest, onRetryAll, stuck, drawer, onCash
         <span style={{ fontFamily: SANS, fontSize: 13.5, fontWeight: 600, color: C.cream }}>
           Fiscal printer
         </span>
-        <span style={{ fontFamily: SANS, fontSize: 12, color: venue.fiscalEnabled ? C.mint : C.sageDim }}>
-          {venue.fiscalEnabled ? (venue.fiscalBridgeUrl ? "connected" : "on, no address set") : "off"}
+        <span style={{ fontFamily: SANS, fontSize: 12,
+          color: status?.ok ? C.mint : status ? C.copper : C.sageDim }}>
+          {!venue.fiscalEnabled ? "off"
+            : !venue.fiscalBridgeUrl ? "on, no address set"
+            : status?.ok ? "reachable"
+            : status ? "not answering"
+            : "on — not tested"}
         </span>
         {stuck > 0 && (
           <span style={{ fontFamily: MONO, fontSize: 11, color: C.copper, border: `1px solid ${C.copper}55`,
@@ -1778,7 +1783,8 @@ function FiscalPanel({ venue, actions, onTest, onRetryAll, stuck, drawer, onCash
           </div>
 
           <Field label="Bridge address" value={cfg.url} mono
-            onChange={(v) => setCfg({ ...cfg, url: v })} placeholder="http://192.168.1.50:8377" />
+            onChange={(v) => setCfg({ ...cfg, url: v.trim().replace(/\/+$/, "").replace(/\/fiscal.*$/, "") })}
+            placeholder="http://192.168.1.50:8377" />
           <Field label="Shared token (optional)" value={cfg.token} mono
             onChange={(v) => setCfg({ ...cfg, token: v })} placeholder="leave blank if unset" />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
@@ -1803,12 +1809,21 @@ function FiscalPanel({ venue, actions, onTest, onRetryAll, stuck, drawer, onCash
           </div>
 
           {status && (
-            <div style={{ fontFamily: MONO, fontSize: 12, padding: "10px 12px", borderRadius: 9,
-              background: C.ink, border: `1px solid ${status.ok ? C.line2 : C.copper}`,
-              color: status.ok ? C.mint : C.copper }}>
-              {status.ok
-                ? `${status.device} · paper ${status.paper} · ${status.printedToday ?? 0} printed`
-                : status.message || status.error}
+            <div style={{ padding: "11px 13px", borderRadius: 9, background: C.ink,
+              border: `1px solid ${status.ok ? C.line2 : C.copper}` }}>
+              <div style={{ fontFamily: MONO, fontSize: 12, color: status.ok ? C.mint : C.copper }}>
+                {status.ok
+                  ? `${status.device} · paper ${status.paper} · ${status.printedToday ?? 0} printed`
+                  : status.message || status.error}
+              </div>
+              {!status.ok && (
+                <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim, marginTop: 8, lineHeight: 1.55 }}>
+                  Open <span style={{ fontFamily: MONO, color: C.sage }}>{cfg.url}/fiscal/status</span> in
+                  a browser on this device. JSON means it is reachable and something else is wrong;
+                  a sign-in page means the address is not public; nothing at all means the address
+                  is wrong or the bridge is not running.
+                </div>
+              )}
             </div>
           )}
 
