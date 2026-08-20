@@ -2099,7 +2099,7 @@ function Team({ venue, staff: allStaff, events, flash, actions }) {
               Owner — sees the money, and takes orders like anyone else
             </div>
           </div>
-          <span style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>PIN set at setup</span>
+          <Btn size="sm" icon={KeyRound} onClick={() => setChanging(true)}>Change my PIN</Btn>
         </div>
         {staff.map((s) => (
           <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", borderBottom: `1px solid ${C.lineFade}` }}>
