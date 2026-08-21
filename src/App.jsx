@@ -672,7 +672,13 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
           <Btn variant="bare" icon={X} onClick={onClose} />
         </div>
 
-        <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative", flexWrap: narrow ? "nowrap" : "wrap" }}>
+        {/* nowrap, always. With flex-wrap:wrap the line is free to grow taller
+            than this container, so the receipt's footer — TOTAL, Save order,
+            Close bill — gets pushed below the sheet and clipped. Measured: the
+            footer landed 100px past the viewport on a full menu. The two panes
+            already have min-widths and the sheet switches to a single pane
+            below 620px, so wrapping was never doing any work. */}
+        <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative", flexWrap: "nowrap" }}>
           <div style={{
             flex: "1 1 340px", minWidth: narrow ? 0 : 280,
             display: narrow && showBill ? "none" : "flex",
