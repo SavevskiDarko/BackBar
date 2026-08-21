@@ -635,15 +635,20 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
     return [...prev, { articleId: a.id, name: a.name, category: a.category, price: a.price, cost: a.cost, qty: 1 }];
   });
   const bump = (id, d) => setLines((prev) => prev.map((l) => (l.articleId === id ? { ...l, qty: l.qty + d } : l)).filter((l) => l.qty > 0));
+  const remove = (id) => setLines((prev) => prev.filter((l) => l.articleId !== id));
 
   return (
     <div
       onClick={(e) => e.target === e.currentTarget && onClose()}
-      style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(4,10,8,0.72)", backdropFilter: "blur(6px)", display: "flex" }}
+      style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(4,10,8,0.72)",
+        backdropFilter: "blur(6px)", display: "flex", padding: narrow ? 0 : 24 }}
     >
       <div style={{
         width: "100%", maxWidth: narrow ? "100%" : 1080, margin: narrow ? 0 : "auto",
-        height: narrow ? "100%" : undefined, maxHeight: "100%",
+        /* A definite height, always. With `undefined` the sheet was sized by the
+           catalog, so a long menu pushed the receipt's pay buttons off-screen. */
+        height: narrow ? "100%" : "min(760px, calc(100vh - 48px))",
+        maxHeight: "100%",
         display: "flex", flexDirection: "column", background: C.panel,
         border: narrow ? "none" : `1px solid ${C.line}`,
         borderRadius: narrow ? 0 : 18, overflow: "hidden",
@@ -691,7 +696,7 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
             </div>
             <div style={{
               flex: 1, overflowY: "auto", WebkitOverflowScrolling: "touch",
-              padding: narrow ? "0 16px 96px" : "0 16px 16px",
+              padding: narrow ? "0 16px 96px" : (lines.length ? "0 16px 62px" : "0 16px 16px"),
               display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(132px,1fr))",
               gap: 8, alignContent: "start",
             }}>
@@ -707,6 +712,22 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
               {!shown.length && <div style={{ color: C.sageDim, fontFamily: SANS, fontSize: 13, gridColumn: "1/-1", padding: 12 }}>Nothing matches. Try another category.</div>}
             </div>
           </div>
+
+          {!narrow && lines.length > 0 && (
+            <div style={{
+              position: "absolute", left: 0, bottom: 0, width: "50%",
+              padding: "10px 16px", display: "flex", alignItems: "center", gap: 12,
+              background: "rgba(16,29,24,0.94)", backdropFilter: "blur(8px)",
+              borderTop: `1px solid ${C.line}`,
+            }}>
+              <span style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>
+                {lines.reduce((a, l) => a + l.qty, 0)} on this bill
+              </span>
+              <span style={{ marginLeft: "auto", fontFamily: MONO, fontSize: 17, color: C.cream }}>
+                {money(total, venue.currency)}
+              </span>
+            </div>
+          )}
 
           {narrow && !showBill && (
             <div style={{
@@ -759,14 +780,52 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
             <div style={{ flex: 1, overflowY: "auto", padding: "8px 18px" }}>
               {!lines.length && <div style={{ fontFamily: MONO, fontSize: 12, color: "#9C927A", padding: "20px 0" }}>Nothing ordered yet. Tap a drink to start the bill.</div>}
               {lines.map((l) => (
-                <div key={l.articleId} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px dashed rgba(0,0,0,0.13)" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                    <button onClick={() => bump(l.articleId, -1)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#6B6250", padding: 3 }}><Minus size={13} /></button>
-                    <span style={{ fontFamily: MONO, fontSize: 13, width: 20, textAlign: "center", color: "#221E15" }}>{l.qty}</span>
-                    <button onClick={() => bump(l.articleId, 1)} style={{ border: "none", background: "transparent", cursor: "pointer", color: "#6B6250", padding: 3 }}><Plus size={13} /></button>
+                <div key={l.articleId} style={{ display: "flex", alignItems: "center", gap: 10,
+                  padding: "9px 0", borderBottom: "1px dashed rgba(0,0,0,0.13)" }}>
+                  {/* Bigger targets: this gets used at speed, with one hand,
+                      often by someone holding a tray. */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
+                    <button onClick={() => bump(l.articleId, -1)} aria-label="one less"
+                      style={{ border: "1px solid rgba(0,0,0,0.15)", background: "transparent",
+                        cursor: "pointer", color: "#4A4335", width: 30, height: 30, borderRadius: 8,
+                        display: "grid", placeItems: "center" }}>
+                      <Minus size={14} />
+                    </button>
+                    <span style={{ fontFamily: MONO, fontSize: 14, width: 26, textAlign: "center",
+                      color: "#221E15", fontWeight: 600 }}>{l.qty}</span>
+                    <button onClick={() => bump(l.articleId, 1)} aria-label="one more"
+                      style={{ border: "1px solid rgba(0,0,0,0.15)", background: "transparent",
+                        cursor: "pointer", color: "#4A4335", width: 30, height: 30, borderRadius: 8,
+                        display: "grid", placeItems: "center" }}>
+                      <Plus size={14} />
+                    </button>
                   </div>
-                  <div style={{ flex: 1, minWidth: 0, fontFamily: MONO, fontSize: 12.5, color: "#221E15" }}>{l.name}</div>
-                  <div style={{ fontFamily: MONO, fontSize: 12.5, color: "#221E15", fontVariantNumeric: "tabular-nums" }}>{money(l.price * l.qty, venue.currency)}</div>
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: MONO, fontSize: 13, color: "#221E15", overflow: "hidden",
+                      textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.name}</div>
+                    {l.qty > 1 && (
+                      <div style={{ fontFamily: MONO, fontSize: 10.5, color: "#8A7F66", marginTop: 1 }}>
+                        {money(l.price, venue.currency)} each
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ fontFamily: MONO, fontSize: 13.5, color: "#221E15",
+                    fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
+                    {money(l.price * l.qty, venue.currency)}
+                  </div>
+
+                  {/* An explicit remove. Tapping minus until the line vanishes is
+                      guesswork, and on a bill of six that is six taps. */}
+                  <button onClick={() => remove(l.articleId)} aria-label={`remove ${l.name}`}
+                    style={{ border: "none", background: "transparent", cursor: "pointer",
+                      color: "#A9998A", width: 28, height: 28, borderRadius: 8, flexShrink: 0,
+                      display: "grid", placeItems: "center" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.color = "#B4442A")}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = "#A9998A")}>
+                    <Trash2 size={14} />
+                  </button>
                 </div>
               ))}
             </div>
