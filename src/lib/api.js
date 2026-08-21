@@ -27,6 +27,9 @@ function friendly(msg = "") {
   if (msg.includes("confirmation_does_not_match")) return "The name you typed doesn't match.";
   if (msg.includes("article_not_on_this_bars_list")) return "That item isn't on this bar's price list.";
   if (msg.includes("must keep one active owner")) return "A bar must keep one active owner.";
+  if (msg.includes("nothing_selected")) return "Pick what they're paying for first.";
+  if (msg.includes("more_than_is_on_the_table")) return "That's more than the table ordered.";
+  if (msg.includes("line_not_on_this_table")) return "That item isn't on this table any more.";
   if (msg.includes("current_pin_wrong")) return "That isn't your current PIN.";
   if (msg.includes("pin_unchanged")) return "The new PIN is the same as the old one.";
   if (msg.includes("payments_do_not_match_total"))
@@ -98,6 +101,26 @@ export async function closeBill(client, { orderId, billId, method, paid, discoun
         p_paid: paid,
         p_discount: discount,
         p_bill: billId || crypto.randomUUID(),
+        p_payments: paid && payments?.length > 1 ? payments : null,
+        p_customer: customer?.taxId ? customer : null,
+      })
+    )
+  );
+}
+
+/** One guest settling their share. The rest of the table stays open.
+    billId is generated on the client, so a retry returns the same bill rather
+    than charging the guest twice. */
+export async function payPartOfOrder(client, { orderId, billId, lines, method, paid = true, discount = 0, payments, customer }) {
+  return mapBill(
+    unwrap(
+      await client.rpc("pay_part_of_order", {
+        p_order: orderId,
+        p_bill: billId || crypto.randomUUID(),
+        p_lines: lines.map((l) => ({ article_id: l.articleId, qty: l.qty })),
+        p_method: paid ? method : null,
+        p_paid: paid,
+        p_discount: discount,
         p_payments: paid && payments?.length > 1 ? payments : null,
         p_customer: customer?.taxId ? customer : null,
       })

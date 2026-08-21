@@ -606,7 +606,7 @@ function FloorPlan({ zone, orders, venueId, mode, selectedId, onSelect, onMove, 
 
 /* -------------------------------------------------------------- order sheet */
 
-function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, onSettle, now, canSeeCost, canDiscount, actorName, busy }) {
+function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, onSettle, onPayPart, now, canSeeCost, canDiscount, actorName, busy }) {
   const [lines, setLines] = useState(order ? order.lines.map((l) => ({ ...l })) : []);
   const [guests, setGuests] = useState(order ? order.guests : table.seats || 2);
   const [cat, setCat] = useState("All");
@@ -615,6 +615,7 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
   const [discount, setDiscount] = useState(0);
   // Part cash, part card is ordinary in a bar. Null means a single tender.
   const [split, setSplit] = useState(null);      // { cash, card }
+  const [partial, setPartial] = useState(false); // one guest settling early
   const [customer, setCustomer] = useState(null); // { taxId, name }
   const narrow = useNarrow();
   const [showBill, setShowBill] = useState(false);
@@ -857,11 +858,27 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
                 </div>
               )}
 
-              {!paying ? (
-                <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                  <Btn variant="quiet" disabled={busy} onClick={() => onCommit(lines, guests)} icon={busy ? Loader2 : Save} style={{ flex: 1, background: "#221E15", color: C.cream, borderColor: "#221E15" }}>Save order</Btn>
-                  <Btn variant="solid" disabled={!lines.length || busy || !order} onClick={() => setPaying(true)} icon={Receipt} style={{ flex: 1 }}>Close bill</Btn>
-                </div>
+              {partial ? (
+                <SplitByItems
+                  lines={lines} cur={venue.currency} busy={busy}
+                  onCancel={() => setPartial(false)}
+                  onConfirm={(chosen, method) => onPayPart(chosen, method)}
+                />
+              ) : !paying ? (
+                <>
+                  <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                    <Btn variant="quiet" disabled={busy} onClick={() => onCommit(lines, guests)} icon={busy ? Loader2 : Save} style={{ flex: 1, background: "#221E15", color: C.cream, borderColor: "#221E15" }}>Save order</Btn>
+                    <Btn variant="solid" disabled={!lines.length || busy || !order} onClick={() => setPaying(true)} icon={Receipt} style={{ flex: 1 }}>Close bill</Btn>
+                  </div>
+                  {/* Only offered on a saved order: the split happens
+                      server-side against lines that exist there. */}
+                  {order && lines.length > 0 && (
+                    <Btn variant="bare" onClick={() => setPartial(true)}
+                      style={{ width: "100%", marginTop: 6, color: "#6B6250" }}>
+                      Someone&apos;s leaving — pay part
+                    </Btn>
+                  )}
+                </>
               ) : (
                 <div style={{ marginTop: 14 }}>
                   {canDiscount && (
@@ -939,6 +956,92 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* One guest leaving early. Pick what they had; the rest stays on the table.
+   Quantities matter — four people sharing a bottle of wine means one of them
+   pays for one of the three glasses, not the whole line. */
+function SplitByItems({ lines, cur, onCancel, onConfirm, busy }) {
+  const [take, setTake] = useState({});   // articleId -> qty being paid now
+
+  const bump = (id, max, d) =>
+    setTake((t) => {
+      const next = clamp((t[id] || 0) + d, 0, max);
+      const out = { ...t };
+      if (next === 0) delete out[id]; else out[id] = next;
+      return out;
+    });
+
+  const chosen = lines
+    .filter((l) => take[l.articleId])
+    .map((l) => ({ ...l, qty: take[l.articleId] }));
+  const total = round2(chosen.reduce((a, l) => a + l.price * l.qty, 0));
+  const rest = round2(lines.reduce((a, l) => a + l.price * l.qty, 0) - total);
+
+  const chip = (on) => ({
+    width: 28, height: 28, borderRadius: 8, cursor: "pointer",
+    border: `1px solid ${on ? "rgba(0,0,0,0.3)" : "rgba(0,0,0,0.15)"}`,
+    background: "transparent", color: "#4A4335", display: "grid", placeItems: "center",
+  });
+
+  return (
+    <div>
+      <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.16em", color: "#8A7F66", marginBottom: 8 }}>
+        WHAT ARE THEY PAYING FOR?
+      </div>
+
+      <div style={{ maxHeight: 200, overflowY: "auto", marginBottom: 10 }}>
+        {lines.map((l) => {
+          const n = take[l.articleId] || 0;
+          return (
+            <div key={l.articleId} style={{ display: "flex", alignItems: "center", gap: 8,
+              padding: "7px 0", borderBottom: "1px dashed rgba(0,0,0,0.12)",
+              opacity: n ? 1 : 0.55 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
+                <button style={chip(n > 0)} onClick={() => bump(l.articleId, l.qty, -1)}>
+                  <Minus size={13} />
+                </button>
+                <span style={{ fontFamily: MONO, fontSize: 13, width: 34, textAlign: "center",
+                  color: n ? "#221E15" : "#9C927A", fontWeight: n ? 600 : 400 }}>
+                  {n}/{l.qty}
+                </span>
+                <button style={chip(n < l.qty)} onClick={() => bump(l.articleId, l.qty, 1)}>
+                  <Plus size={13} />
+                </button>
+              </div>
+              <span style={{ flex: 1, minWidth: 0, fontFamily: MONO, fontSize: 12.5, color: "#221E15",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.name}</span>
+              <span style={{ fontFamily: MONO, fontSize: 12.5, color: n ? "#221E15" : "#9C927A" }}>
+                {money(l.price * (n || l.qty), cur)}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
+        padding: "8px 0", borderTop: "1px solid rgba(0,0,0,0.15)" }}>
+        <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: "0.14em", color: "#6B6250" }}>
+          THIS GUEST
+        </span>
+        <span style={{ fontFamily: MONO, fontSize: 22, fontWeight: 700, color: "#1A1608" }}>
+          {money(total, cur)}
+        </span>
+      </div>
+      <div style={{ fontFamily: MONO, fontSize: 11.5, color: "#8A7F66" }}>
+        {money(rest, cur)} stays on the table
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+        <Btn variant="bare" onClick={onCancel} style={{ flex: 1, color: "#6B6250" }}>Back</Btn>
+        <Btn variant="quiet" disabled={busy || !chosen.length} icon={Banknote}
+          onClick={() => onConfirm(chosen, "cash")}
+          style={{ flex: 1, background: "#221E15", color: C.cream, borderColor: "#221E15" }}>Cash</Btn>
+        <Btn variant="solid" disabled={busy || !chosen.length} icon={CreditCard}
+          onClick={() => onConfirm(chosen, "card")} style={{ flex: 1 }}>Card</Btn>
       </div>
     </div>
   );
@@ -3118,6 +3221,23 @@ export default function App() {
     finally { setSheetBusy(false); }
   };
 
+  /* One guest settles and leaves. Their portion becomes its own bill with its
+     own receipt; the table stays open with what's left. */
+  const payPart = async (chosen, method) => {
+    if (!openOrder) return flash("Save the order first.");
+    setSheetBusy(true);
+    const billId = crypto.randomUUID();
+    try {
+      const bill = await api.payPartOfOrder(client, {
+        orderId: openOrder.id, billId, lines: chosen, method, paid: true,
+      });
+      await refresh();
+      flash(`Paid ${money(bill.total, venue.currency)} — the table stays open`);
+      if (venue.fiscalEnabled && venue.fiscalBridgeUrl) printFiscal(billId);
+    } catch (e) { flash(e.message); }
+    finally { setSheetBusy(false); }
+  };
+
   const settleOrder = async (method, paid, discount, payments, customer) => {
     if (!openOrder) return flash("Save the order before closing it.");
     setSheetBusy(true);
@@ -3685,6 +3805,7 @@ export default function App() {
           onClose={() => setOpenTableId(null)}
           onCommit={commitOrder}
           onSettle={settleOrder}
+          onPayPart={payPart}
         />
       )}
 
