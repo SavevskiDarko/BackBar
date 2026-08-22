@@ -2093,15 +2093,22 @@ function CashCardStat({ cash, card, cur }) {
   const total = cash + card;
   const cashPct = total > 0 ? (cash / total) * 100 : 0;
 
+  /* Label above, amount below, each on its own full-width line.
+     Side by side, the label reserved space the amount needed — and with
+     nowrap the amount escaped the card instead of shrinking. Nothing here
+     forbids wrapping now, so the worst case is two lines inside the box
+     rather than text running off the edge. */
   const col = (label, value, dot) => (
-    <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
-      <span style={{ width: 7, height: 7, borderRadius: 99, background: dot, flexShrink: 0 }} />
-      <span style={{ fontFamily: SANS, fontSize: 10.5, fontWeight: 700, letterSpacing: "0.14em",
-        textTransform: "uppercase", color: C.sageDim, flexShrink: 0 }}>{label}</span>
-      <span style={{ marginLeft: "auto", fontFamily: MONO, fontSize: 19, fontWeight: 600,
-        color: C.cream, whiteSpace: "nowrap" }}>
+    <div style={{ minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ width: 7, height: 7, borderRadius: 99, background: dot, flexShrink: 0 }} />
+        <span style={{ fontFamily: SANS, fontSize: 10, fontWeight: 700, letterSpacing: "0.14em",
+          textTransform: "uppercase", color: C.sageDim }}>{label}</span>
+      </div>
+      <div style={{ fontFamily: MONO, fontSize: 18, fontWeight: 600, color: C.cream,
+        marginTop: 3, letterSpacing: "-0.01em", overflowWrap: "anywhere" }}>
         {money(value, cur)}
-      </span>
+      </div>
     </div>
   );
 
