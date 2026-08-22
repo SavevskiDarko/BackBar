@@ -609,7 +609,7 @@ function FloorPlan({ zone, orders, venueId, mode, selectedId, onSelect, onMove, 
 
 /* -------------------------------------------------------------- order sheet */
 
-function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, onSettle, onPayPart, now, canSeeCost, canDiscount, actorName, busy, startOn = "menu" }) {
+function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, onSettle, onPayPart, now, canSeeCost, canDiscount, actorName, busy, startOn = "menu", syncToken = 0 }) {
   const [lines, setLines] = useState(order ? order.lines.map((l) => ({ ...l })) : []);
   const [guests, setGuests] = useState(order ? order.guests : table.seats || 2);
   const [cat, setCat] = useState("All");
@@ -637,10 +637,29 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
   useBackLayer(paying, () => setPaying(false));
   useBackLayer(partial, () => setPartial(false));
 
+  /* Re-read the table after part of it has been paid. Deliberately driven by an
+     explicit signal rather than by watching `order`: a realtime update from
+     another device would otherwise wipe drinks this waiter has typed but not
+     yet saved. */
+  useEffect(() => {
+    if (!syncToken) return;
+    setLines((order?.lines || []).map((l) => ({ ...l })));
+    setPartial(false);
+    setPaying(false);
+  }, [syncToken]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   const cats = useMemo(() => ["All", ...Array.from(new Set(articles.map((a) => a.category)))], [articles]);
   const shown = useMemo(() => articles.filter((a) =>
     a.active !== false && (cat === "All" || a.category === cat) && (!q || a.name.toLowerCase().includes(q.toLowerCase()))
   ), [articles, cat, q]);
+
+  /* Anything typed since the last save isn't on the table yet, which matters
+     for splitting — the server acts on saved rows. */
+  const dirty = useMemo(() => {
+    const a = (order?.lines || []).map((l) => `${l.articleId}:${l.qty}`).sort().join("|");
+    const b = lines.map((l) => `${l.articleId}:${l.qty}`).sort().join("|");
+    return a !== b;
+  }, [order, lines]);
 
   const gross = round2(lines.reduce((s, l) => s + l.price * l.qty, 0));
   const disc = round2((gross * discount) / 100);
@@ -801,7 +820,8 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
               <div style={{ fontFamily: MONO, fontSize: 11, letterSpacing: "0.2em", color: "#8A7F66" }}>{venue.name.toUpperCase()}</div>
               <div style={{ fontFamily: MONO, fontSize: 11, color: "#8A7F66", marginTop: 2 }}>TABLE {table.label} · {guests} GUESTS · {actorName.toUpperCase()}</div>
             </div>
-            <div style={{ flex: 1, overflowY: "auto", padding: "8px 18px" }}>
+            <div style={{ flex: 1, overflowY: "auto", padding: "8px 18px",
+              display: partial ? "none" : "block" }}>
               {!lines.length && <div style={{ fontFamily: MONO, fontSize: 12, color: "#9C927A", padding: "20px 0" }}>Nothing ordered yet. Tap a drink to start the bill.</div>}
               {lines.map((l) => (
                 <div key={l.articleId} style={{ display: "flex", alignItems: "center", gap: 10,
@@ -877,7 +897,10 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
 
               {partial ? (
                 <SplitByItems
-                  lines={lines} cur={venue.currency} busy={busy}
+                  /* Server truth, not the sheet's local edits. Splitting acts
+                     on rows that exist on the table; anything typed but not
+                     saved isn't there yet. */
+                  lines={order?.lines || []} cur={venue.currency} busy={busy}
                   onCancel={() => setPartial(false)}
                   onConfirm={(chosen, method) => onPayPart(chosen, method)}
                 />
@@ -890,7 +913,12 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
                   {/* Only offered on a saved order: the split happens
                       server-side against lines that exist there. */}
                   {order && lines.length > 0 && (
-                    <Btn variant="bare" onClick={() => setPartial(true)}
+                    <Btn variant="bare" onClick={async () => {
+                      // Unsaved changes aren't on the table yet, and the split
+                      // works against the table. Save first, stay open.
+                      if (dirty) { const ok = await onCommit(lines, guests, false); if (!ok) return; }
+                      setPartial(true);
+                    }}
                       style={{ width: "100%", marginTop: 6, color: "#6B6250" }}>
                       Someone&apos;s leaving — pay part
                     </Btn>
@@ -3036,6 +3064,10 @@ export default function App() {
      phone, where the two panes take turns. */
   const [openOn, setOpenOn] = useState("menu");
   const [sheetBusy, setSheetBusy] = useState(false);
+  /* Bumped after a partial payment. The sheet keeps its line list in local
+     state, so without a nudge it would keep showing an item that has just been
+     paid for and removed from the table. */
+  const [sheetSync, setSheetSync] = useState(0);
   const [toast, setToast] = useState(null);
   const now = useNow(20000);
   const installPrompt = useInstallPrompt();
@@ -3217,7 +3249,7 @@ export default function App() {
 
   /* ---- orders: these are the writes that must survive a dead connection ---- */
 
-  const commitOrder = async (lines, guests) => {
+  const commitOrder = async (lines, guests, close = true) => {
     setSheetBusy(true);
     const orderId = openOrder?.id || crypto.randomUUID();
     const payload = {
@@ -3234,11 +3266,12 @@ export default function App() {
           openedAt: payload.openedAt,
         })
       );
-      setOpenTableId(null);
+      if (close) setOpenTableId(null);
       flash(res === "queued"
         ? `Table ${table.label} saved on this device — will sync`
         : `Table ${table.label} saved`);
-    } catch (e) { flash(e.message); }
+      return true;
+    } catch (e) { flash(e.message); return false; }
     finally { setSheetBusy(false); }
   };
 
@@ -3253,7 +3286,22 @@ export default function App() {
         orderId: openOrder.id, billId, lines: chosen, method, paid: true,
       });
       await refresh();
-      flash(`Paid ${money(bill.total, venue.currency)} — the table stays open`);
+
+      /* Did that clear the table? Work it out from what was taken rather than
+         waiting for state to settle. */
+      const takenAll = openOrder.lines.every((l) => {
+        const c = chosen.find((x) => (x.id || x.articleId) === (l.id || l.articleId));
+        return c && c.qty >= l.qty;
+      });
+
+      if (takenAll) {
+        setOpenTableId(null);
+        flash(`Paid ${money(bill.total, venue.currency)} — table closed`);
+      } else {
+        // The sheet stays open, so tell it to re-read the remaining lines.
+        setSheetSync((n) => n + 1);
+        flash(`Paid ${money(bill.total, venue.currency)} — the rest stays on the table`);
+      }
       if (venue.fiscalEnabled && venue.fiscalBridgeUrl) printFiscal(billId);
     } catch (e) { flash(e.message); }
     finally { setSheetBusy(false); }
@@ -3837,6 +3885,7 @@ export default function App() {
           table={table} zone={zone} venue={venue} order={openOrder} articles={articles} now={now}
           actorName={session.actorName}
           startOn={openOn}
+          syncToken={sheetSync}
           canSeeCost={isOwner}
           canDiscount={isOwner || venue.allowStaffDiscount}
           busy={sheetBusy}

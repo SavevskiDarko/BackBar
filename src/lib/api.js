@@ -117,7 +117,7 @@ export async function payPartOfOrder(client, { orderId, billId, lines, method, p
       await client.rpc("pay_part_of_order", {
         p_order: orderId,
         p_bill: billId || crypto.randomUUID(),
-        p_lines: lines.map((l) => ({ article_id: l.articleId, qty: l.qty })),
+        p_lines: lines.map((l) => ({ line_id: l.id, article_id: l.articleId, qty: l.qty })),
         p_method: paid ? method : null,
         p_paid: paid,
         p_discount: discount,
@@ -527,6 +527,7 @@ const mapArticle = (a) => ({
 });
 
 const mapLine = (l) => ({
+  id: l.id,                       // the order_line row; what a split matches on
   articleId: l.article_id,
   name: l.name,
   category: l.category,
