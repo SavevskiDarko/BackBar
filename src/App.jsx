@@ -1657,8 +1657,7 @@ function Reports({ venue, report, products, productsLoading, loading, mode, setM
           </div>
         </div>
 
-        <Stat label="Cash / card" value={money(Number(t.cash) || 0, cur)}
-          sub={`card ${money(Number(t.card) || 0, cur)}`} />
+        <CashCardStat cash={Number(t.cash) || 0} card={Number(t.card) || 0} cur={cur} />
 
         {totalVat > 0 && (
           <Stat label="VAT in these takings" value={money(round2(totalVat), cur)}
@@ -2082,6 +2081,49 @@ function FiscalPanel({ venue, actions, onTest, onRetryAll, stuck, drawer, onCash
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/* Two amounts of equal standing. The old version put cash in the big slot and
+   card in the small print, which reads as a headline and a footnote — badly
+   wrong on a night when card takes more than cash, as it usually does. */
+function CashCardStat({ cash, card, cur }) {
+  const total = cash + card;
+  const cashPct = total > 0 ? (cash / total) * 100 : 0;
+
+  const col = (label, value, dot) => (
+    <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
+      <span style={{ width: 7, height: 7, borderRadius: 99, background: dot, flexShrink: 0 }} />
+      <span style={{ fontFamily: SANS, fontSize: 10.5, fontWeight: 700, letterSpacing: "0.14em",
+        textTransform: "uppercase", color: C.sageDim, flexShrink: 0 }}>{label}</span>
+      <span style={{ marginLeft: "auto", fontFamily: MONO, fontSize: 19, fontWeight: 600,
+        color: C.cream, whiteSpace: "nowrap" }}>
+        {money(value, cur)}
+      </span>
+    </div>
+  );
+
+  return (
+    <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14,
+      padding: "16px 18px", minWidth: 0 }}>
+      <Eyebrow>How they paid</Eyebrow>
+      <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+        {col("Cash", cash, C.brass)}
+        {col("Card", card, C.line2)}
+      </div>
+      {total > 0 && (
+        <>
+          <div style={{ display: "flex", height: 5, borderRadius: 99, overflow: "hidden",
+            marginTop: 12, background: C.raise }}>
+            <div style={{ width: `${cashPct}%`, background: C.brass }} />
+            <div style={{ flex: 1, background: C.line2 }} />
+          </div>
+          <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim, marginTop: 6 }}>
+            {cashPct.toFixed(0)}% of takings came in cash
+          </div>
+        </>
       )}
     </div>
   );
