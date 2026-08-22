@@ -3521,6 +3521,21 @@ export default function App() {
     };
   }, [loadPlatform, flash]);
 
+  /* ---- the back button ----
+
+     These must sit above the early returns below. React counts hooks per
+     render, so a hook after a conditional return runs on some renders and not
+     others — which is exactly error #310. */
+
+  // Which tab counts as home depends on the role, worked out without touching
+  // the tabs array, which is built after the early returns.
+  const homeTab = session?.role === "platform" ? "bars" : "floor";
+  useBackLayer(!!session && tab !== homeTab, () => setTab(homeTab));
+
+  /* With nothing open, one press warns rather than closing. A tablet on a bar
+     wall gets knocked, and losing the floor mid-service isn't acceptable. */
+  useExitGuard(() => flash("Press back again to leave Backbar"));
+
   /* ---- render ---- */
 
   if (configError) {
@@ -3583,15 +3598,6 @@ export default function App() {
     ? [["floor", "Floor", LayoutGrid], ["design", "Floor designer", Copy], ["menu", "Price list", ListOrdered], ["reports", "Money", BarChart3], ["team", "Team", Users], ["brand", "Branding", Palette]]
     : [["floor", "Floor", LayoutGrid]];
   const currentTab = tabs.some((t) => t[0] === tab) ? tab : tabs[0][0];
-
-  /* Back from a secondary tab returns to the floor before it considers
-     leaving — the floor is where a waiter lives, so it's the natural home. */
-  const homeTab = tabs[0][0];
-  useBackLayer(currentTab !== homeTab, () => setTab(homeTab));
-
-  /* With nothing open, one press warns rather than closing. A tablet on a bar
-     wall gets knocked, and losing the floor mid-service isn't acceptable. */
-  useExitGuard(() => flash("Press back again to leave Backbar"));
 
   const openHere = Object.values(orders);
   const openValue = round2(openHere.reduce((s, o) => s + o.lines.reduce((x, l) => x + l.price * l.qty, 0), 0));
