@@ -18,6 +18,7 @@ import {
   clientFor, onExpired,
 } from "./lib/auth";
 import { useBarData } from "./lib/useBarData";
+import { useBackLayer, useExitGuard } from "./lib/useBackButton";
 import * as api from "./lib/api";
 import * as fiscal from "./lib/fiscal";
 import { WifiOff, RefreshCw, Download } from "lucide-react";
@@ -237,6 +238,8 @@ function Pill({ children, color }) {
 }
 
 function Modal({ children, onClose, width = 400 }) {
+  // Rendered only while open, so mounting is opening. Back closes it.
+  useBackLayer(true, onClose);
   return (
     <div
       onClick={(e) => e.target === e.currentTarget && onClose()}
@@ -606,7 +609,7 @@ function FloorPlan({ zone, orders, venueId, mode, selectedId, onSelect, onMove, 
 
 /* -------------------------------------------------------------- order sheet */
 
-function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, onSettle, onPayPart, now, canSeeCost, canDiscount, actorName, busy }) {
+function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, onSettle, onPayPart, now, canSeeCost, canDiscount, actorName, busy, startOn = "menu" }) {
   const [lines, setLines] = useState(order ? order.lines.map((l) => ({ ...l })) : []);
   const [guests, setGuests] = useState(order ? order.guests : table.seats || 2);
   const [cat, setCat] = useState("All");
@@ -616,9 +619,19 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
   // Part cash, part card is ordinary in a bar. Null means a single tender.
   const [split, setSplit] = useState(null);      // { cash, card }
   const [partial, setPartial] = useState(false); // one guest settling early
+
+  /* Back steps out of the sheet one layer at a time: the item picker, then the
+     payment step, then the bill, then the sheet itself. */
+  useBackLayer(true, onClose);
+  useBackLayer(narrow && showBill, () => setShowBill(false));
+  useBackLayer(paying, () => setPaying(false));
+  useBackLayer(partial, () => setPartial(false));
   const [customer, setCustomer] = useState(null); // { taxId, name }
   const narrow = useNarrow();
-  const [showBill, setShowBill] = useState(false);
+  /* Where the sheet lands depends on why it was opened. Tapping a table means
+     "I'm taking an order" — show the menu. Tapping an open bill means "they
+     want to pay" — show the bill. Same sheet, different intent. */
+  const [showBill, setShowBill] = useState(startOn === "bill");
 
   const cats = useMemo(() => ["All", ...Array.from(new Set(articles.map((a) => a.category)))], [articles]);
   const shown = useMemo(() => articles.filter((a) =>
@@ -3014,6 +3027,10 @@ export default function App() {
   const [tab, setTab] = useState("floor");
   const [zoneId, setZoneId] = useState(null);
   const [openTableId, setOpenTableId] = useState(null);
+  /* Which side of the sheet to land on. Tapping a table is "I'm taking an
+     order"; tapping an open bill is "they want to pay". Only matters on a
+     phone, where the two panes take turns. */
+  const [openOn, setOpenOn] = useState("menu");
   const [sheetBusy, setSheetBusy] = useState(false);
   const [toast, setToast] = useState(null);
   const now = useNow(20000);
@@ -3567,6 +3584,15 @@ export default function App() {
     : [["floor", "Floor", LayoutGrid]];
   const currentTab = tabs.some((t) => t[0] === tab) ? tab : tabs[0][0];
 
+  /* Back from a secondary tab returns to the floor before it considers
+     leaving — the floor is where a waiter lives, so it's the natural home. */
+  const homeTab = tabs[0][0];
+  useBackLayer(currentTab !== homeTab, () => setTab(homeTab));
+
+  /* With nothing open, one press warns rather than closing. A tablet on a bar
+     wall gets knocked, and losing the floor mid-service isn't acceptable. */
+  useExitGuard(() => flash("Press back again to leave Backbar"));
+
   const openHere = Object.values(orders);
   const openValue = round2(openHere.reduce((s, o) => s + o.lines.reduce((x, l) => x + l.price * l.qty, 0), 0));
   const myOpen = isWaiter ? openHere.filter((o) => o.staffId === session.actorId) : openHere;
@@ -3728,7 +3754,8 @@ export default function App() {
               </div>
             ) : (
               <FloorPlan zone={zone} orders={ordersByTable} venueId={venue.id} mode="service" selectedId={null}
-                onSelect={setOpenTableId} onMove={() => {}} currency={venue.currency} now={now} />
+                onSelect={(id) => { setOpenOn("menu"); setOpenTableId(id); }}
+                onMove={() => {}} currency={venue.currency} now={now} />
             )}
 
             {openHere.length > 0 && (
@@ -3741,7 +3768,7 @@ export default function App() {
                     const mine = o.staffId === session.actorId;
                     const z = zones.find((zz) => zz.tables.some((t) => t.id === o.tableId));
                     return (
-                      <button key={o.id} onClick={() => { if (z) setZoneId(z.id); setOpenTableId(o.tableId); }} style={{
+                      <button key={o.id} onClick={() => { if (z) setZoneId(z.id); setOpenOn("bill"); setOpenTableId(o.tableId); }} style={{
                         textAlign: "left", background: C.panel,
                         border: `1px solid ${stale ? "rgba(212,103,74,0.4)" : mine && isWaiter ? C.brassDim : C.line}`,
                         borderRadius: 12, padding: 13, cursor: "pointer",
@@ -3799,6 +3826,7 @@ export default function App() {
         <OrderSheet
           table={table} zone={zone} venue={venue} order={openOrder} articles={articles} now={now}
           actorName={session.actorName}
+          startOn={openOn}
           canSeeCost={isOwner}
           canDiscount={isOwner || venue.allowStaffDiscount}
           busy={sheetBusy}
