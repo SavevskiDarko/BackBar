@@ -620,18 +620,22 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
   const [split, setSplit] = useState(null);      // { cash, card }
   const [partial, setPartial] = useState(false); // one guest settling early
 
-  /* Back steps out of the sheet one layer at a time: the item picker, then the
-     payment step, then the bill, then the sheet itself. */
-  useBackLayer(true, onClose);
-  useBackLayer(narrow && showBill, () => setShowBill(false));
-  useBackLayer(paying, () => setPaying(false));
-  useBackLayer(partial, () => setPartial(false));
   const [customer, setCustomer] = useState(null); // { taxId, name }
   const narrow = useNarrow();
   /* Where the sheet lands depends on why it was opened. Tapping a table means
      "I'm taking an order" — show the menu. Tapping an open bill means "they
      want to pay" — show the bill. Same sheet, different intent. */
   const [showBill, setShowBill] = useState(startOn === "bill");
+
+  /* Back steps out of the sheet one layer at a time: the item picker, then the
+     payment step, then the bill, then the sheet itself.
+
+     These sit below every value they read — the first argument of a hook call
+     is evaluated during render, so `narrow` and `showBill` must already exist. */
+  useBackLayer(true, onClose);
+  useBackLayer(narrow && showBill, () => setShowBill(false));
+  useBackLayer(paying, () => setPaying(false));
+  useBackLayer(partial, () => setPartial(false));
 
   const cats = useMemo(() => ["All", ...Array.from(new Set(articles.map((a) => a.category)))], [articles]);
   const shown = useMemo(() => articles.filter((a) =>
