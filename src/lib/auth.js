@@ -74,6 +74,7 @@ export async function pairDevice(barCode) {
   const bar = {
     id: r.barId, name: r.barName, code: barCode,
     accent: r.accent || null, surface: r.surface || null, logoPath: r.logoPath || null,
+    language: r.language || null,
   };
   savePairing(bar);
   return bar;

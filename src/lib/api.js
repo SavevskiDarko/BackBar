@@ -27,6 +27,7 @@ function friendly(msg = "") {
   if (msg.includes("confirmation_does_not_match")) return "The name you typed doesn't match.";
   if (msg.includes("article_not_on_this_bars_list")) return "That item isn't on this bar's price list.";
   if (msg.includes("must keep one active owner")) return "A bar must keep one active owner.";
+  if (msg.includes("reason_required")) return "Pick a reason first.";
   if (msg.includes("nothing_selected")) return "Pick what they're paying for first.";
   if (msg.includes("more_than_is_on_the_table")) return "That's more than the table ordered.";
   if (msg.includes("line_not_on_this_table")) return "That item isn't on this table any more.";
@@ -128,6 +129,18 @@ export async function payPartOfOrder(client, { orderId, billId, lines, method, p
   );
 }
 
+/** Take something off a saved table. A reason is required — the database
+    enforces it, so nothing that talks to the API can skip it. */
+export async function voidOrderLine(client, { lineId, qty, reason, kind = "void" }) {
+  return unwrap(await client.rpc("void_order_line", {
+    p_line: lineId, p_qty: qty, p_reason: reason, p_kind: kind,
+  }));
+}
+
+export async function loadVoids(client, barId, from, to) {
+  return unwrap(await client.rpc("bar_voids", { p_bar: barId, p_from: from, p_to: to }));
+}
+
 export async function recordCashMovement(client, barId, { kind, amount, reason, fiscalRef }) {
   return unwrap(await client.rpc("record_cash_movement", {
     p_bar: barId, p_kind: kind, p_amount: amount,
@@ -165,6 +178,8 @@ export const outboxHandlers = {
       method: p.method, paid: p.paid, discount: p.discount,
     }),
   "order.cancel": (client, p) => cancelOrder(client, p.orderId),
+  "order.void": (client, p) =>
+    voidOrderLine(client, { lineId: p.lineId, qty: p.qty, reason: p.reason, kind: p.kind }),
 };
 
 /** Owner settling something a waiter marked unpaid. */
@@ -278,6 +293,10 @@ export async function resetOwnerPin(barId, pin) {
 /** An owner resetting one of their waiters. */
 export async function resetStaffPin(client, staffId, pin) {
   return unwrap(await client.rpc("reset_staff_pin", { p_staff: staffId, p_pin: pin || null }));
+}
+
+export async function setLanguage(client, barId, code) {
+  unwrap(await client.from("bars").update({ language: code }).eq("id", barId));
 }
 
 export async function setBranding(client, barId, { accent, surface }) {
@@ -489,6 +508,7 @@ function mapBar(b) {
     fiscalBridgeToken: b.fiscal_bridge_token,
     legalName: b.legal_name,
     taxId: b.tax_id,
+    language: b.language || "en",
     brandAccent: b.brand_accent,
     brandSurface: b.brand_surface,
     logoPath: b.logo_path,

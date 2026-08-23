@@ -165,6 +165,19 @@ export function applyOutbox(snapshot, outbox) {
     if (item.op === "order.close" || item.op === "order.cancel") {
       delete orders[p.orderId];
     }
+    // A void taken while offline should still leave the table looking right.
+    if (item.op === "order.void") {
+      const o = orders[p.orderId];
+      if (o) {
+        orders[p.orderId] = {
+          ...o,
+          lines: o.lines
+            .map((l) => (l.id === p.lineId ? { ...l, qty: l.qty - p.qty } : l))
+            .filter((l) => l.qty > 0),
+          pending: true,
+        };
+      }
+    }
   }
 
   return { ...snapshot, orders };

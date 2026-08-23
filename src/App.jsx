@@ -19,6 +19,7 @@ import {
 } from "./lib/auth";
 import { useBarData } from "./lib/useBarData";
 import { useBackLayer, useExitGuard } from "./lib/useBackButton";
+import { t, setLang, recallLang, LANGUAGES } from "./lib/i18n";
 import * as api from "./lib/api";
 import * as fiscal from "./lib/fiscal";
 import { WifiOff, RefreshCw, Download } from "lucide-react";
@@ -301,7 +302,7 @@ function Keypad({ onDigit, onBack, onClear }) {
       {keys.map((k) => (
         <button key={k} onClick={() => onDigit(k)} style={cell}>{k}</button>
       ))}
-      <button onClick={onClear} style={{ ...cell, color: C.sageDim, fontSize: 12, fontFamily: SANS, fontWeight: 700 }}>CLEAR</button>
+      <button onClick={onClear} style={{ ...cell, color: C.sageDim, fontSize: 12, fontFamily: SANS, fontWeight: 700 }}>{t("CLEAR")}</button>
       <button onClick={() => onDigit("0")} style={cell}>0</button>
       <button onClick={onBack} style={{ ...cell, display: "grid", placeItems: "center" }}><Delete size={19} color={C.sageDim} /></button>
     </div>
@@ -367,9 +368,9 @@ function AuthScreen({ platformName, pairedVenue, onPair, onUnpair, onPin, onPlat
   const go = (m) => { clearError(); setMode(m); };
 
   const heading =
-    mode === "platform" ? { title: "Platform sign-in", sub: "The account that runs the whole network" }
-    : mode === "pair" ? { title: "Set up this device", sub: "Enter the bar's code — you only do this once" }
-    : { title: pairedVenue.name, sub: "Enter your PIN to open the floor" };
+    mode === "platform" ? { title: t("Platform sign-in"), sub: t("The account that runs the whole network") }
+    : mode === "pair" ? { title: t("Set up this device"), sub: t("Enter the bar's code — you only do this once") }
+    : { title: pairedVenue.name, sub: t("Enter your PIN to open the floor") };
 
   return (
     <div style={{ minHeight: "100vh", background: C.ink, display: "grid", placeItems: "center", padding: 20, fontFamily: SANS }}>
@@ -413,7 +414,7 @@ function AuthScreen({ platformName, pairedVenue, onPair, onUnpair, onPin, onPlat
 
         <div style={{ display: "flex", justifyContent: "center", gap: 14, marginTop: 18, flexWrap: "wrap" }}>
           {mode === "pin" && (
-            <button onClick={() => { onUnpair(); go("pair"); }} style={linkBtn}>Not this bar?</button>
+            <button onClick={() => { onUnpair(); go("pair"); }} style={linkBtn}>{t("Not this bar?")}</button>
           )}
           {mode !== "platform" && <button onClick={() => go("platform")} style={linkBtn}>I run {platformName}</button>}
           {mode === "platform" && <button onClick={() => go(pairedVenue ? "pin" : "pair")} style={linkBtn}>Back</button>}
@@ -421,7 +422,7 @@ function AuthScreen({ platformName, pairedVenue, onPair, onUnpair, onPin, onPlat
 
         <UpdateChip />
         <button onClick={() => setHint(!hint)} style={{ ...linkBtn, width: "100%", marginTop: 14 }}>
-          {hint ? "Hide" : "Where do I get a code?"}
+          {hint ? "Hide" : t("Where do I get a code?")}
         </button>
         {hint && (
           <div style={{ marginTop: 8, background: C.panel, border: `1px dashed ${C.line2}`, borderRadius: 11, padding: 13, fontFamily: SANS, fontSize: 11.5, color: C.sage, lineHeight: 1.6 }}>
@@ -680,6 +681,17 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
       style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(4,10,8,0.72)",
         backdropFilter: "blur(6px)", display: "flex", padding: narrow ? 0 : 24 }}
     >
+      {voiding && (
+        <VoidReason
+          line={voiding.line} qty={voiding.qty} cur={venue.currency} busy={busy}
+          onCancel={() => setVoiding(null)}
+          onConfirm={async (reason, kind) => {
+            const ok = await onVoid(voiding.line, voiding.qty, reason, kind);
+            if (ok) setVoiding(null);
+          }}
+        />
+      )}
+
       <div style={{
         width: "100%", maxWidth: narrow ? "100%" : 1080, margin: narrow ? 0 : "auto",
         /* A definite height, always. With `undefined` the sheet was sized by the
@@ -724,7 +736,7 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
             <div style={{ padding: "12px 16px 8px" }}>
               <div style={{ position: "relative" }}>
                 <Search size={14} color={C.sageDim} style={{ position: "absolute", left: 11, top: 11 }} />
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a drink"
+                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("Find a drink")}
                   style={{ width: "100%", background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9, padding: "9px 12px 9px 32px", color: C.cream, fontFamily: SANS, fontSize: 13, outline: "none" }} />
               </div>
             </div>
@@ -752,7 +764,7 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
                   <span style={{ fontFamily: MONO, fontSize: 12, color: C.brass, marginTop: 6 }}>{money(a.price, venue.currency)}</span>
                 </button>
               ))}
-              {!shown.length && <div style={{ color: C.sageDim, fontFamily: SANS, fontSize: 13, gridColumn: "1/-1", padding: 12 }}>Nothing matches. Try another category.</div>}
+              {!shown.length && <div style={{ color: C.sageDim, fontFamily: SANS, fontSize: 13, gridColumn: "1/-1", padding: 12 }}>{t("Nothing matches. Try another category.")}</div>}
             </div>
           </div>
 
@@ -792,9 +804,7 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
                 variant="solid" size="lg" icon={Receipt}
                 onClick={() => setShowBill(true)}
                 style={{ flexShrink: 0 }}
-              >
-                Bill
-              </Btn>
+              >{t("Bill")}</Btn>
             </div>
           )}
 
@@ -813,7 +823,7 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
                   color: "#6B6250", fontFamily: SANS, fontSize: 13, fontWeight: 600, padding: 0,
                 }}
               >
-                <ArrowLeft size={15} /> Back to the menu
+                <ArrowLeft size={15} /> {t("Back to the menu")}
               </button>
             )}
             <div style={{ padding: "14px 18px 6px", flexShrink: 0 }}>
@@ -822,7 +832,7 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
             </div>
             <div style={{ flex: 1, overflowY: "auto", padding: "8px 18px",
               display: partial ? "none" : "block" }}>
-              {!lines.length && <div style={{ fontFamily: MONO, fontSize: 12, color: "#9C927A", padding: "20px 0" }}>Nothing ordered yet. Tap a drink to start the bill.</div>}
+              {!lines.length && <div style={{ fontFamily: MONO, fontSize: 12, color: "#9C927A", padding: "20px 0" }}>{t("Nothing ordered yet. Tap a drink to start the bill.")}</div>}
               {lines.map((l) => (
                 <div key={l.articleId} style={{ display: "flex", alignItems: "center", gap: 10,
                   padding: "9px 0", borderBottom: "1px dashed rgba(0,0,0,0.13)" }}>
@@ -881,7 +891,7 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
                 </div>
               )}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 4 }}>
-                <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: "0.18em", color: "#6B6250" }}>TOTAL</span>
+                <span style={{ fontFamily: MONO, fontSize: 12, letterSpacing: "0.18em", color: "#6B6250" }}>{t("TOTAL")}</span>
                 <span style={{ fontFamily: MONO, fontSize: 28, fontWeight: 700, color: "#1A1608", fontVariantNumeric: "tabular-nums" }}>{money(total, venue.currency)}</span>
               </div>
               {canSeeCost && (
@@ -907,8 +917,8 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
               ) : !paying ? (
                 <>
                   <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                    <Btn variant="quiet" disabled={busy} onClick={() => onCommit(lines, guests)} icon={busy ? Loader2 : Save} style={{ flex: 1, background: "#221E15", color: C.cream, borderColor: "#221E15" }}>Save order</Btn>
-                    <Btn variant="solid" disabled={!lines.length || busy || !order} onClick={() => setPaying(true)} icon={Receipt} style={{ flex: 1 }}>Close bill</Btn>
+                    <Btn variant="quiet" disabled={busy} onClick={() => onCommit(lines, guests)} icon={busy ? Loader2 : Save} style={{ flex: 1, background: "#221E15", color: C.cream, borderColor: "#221E15" }}>{t("Save order")}</Btn>
+                    <Btn variant="solid" disabled={!lines.length || busy || !order} onClick={() => setPaying(true)} icon={Receipt} style={{ flex: 1 }}>{t("Close bill")}</Btn>
                   </div>
                   {/* Only offered on a saved order: the split happens
                       server-side against lines that exist there. */}
@@ -920,7 +930,7 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
                       setPartial(true);
                     }}
                       style={{ width: "100%", marginTop: 6, color: "#6B6250" }}>
-                      Someone&apos;s leaving — pay part
+                      {t("Someone\u2019s leaving — pay part")}
                     </Btn>
                   )}
                 </>
@@ -938,21 +948,21 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
                       ))}
                     </div>
                   )}
-                  <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.16em", color: "#8A7F66", marginBottom: 7 }}>DID THEY PAY?</div>
+                  <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.16em", color: "#8A7F66", marginBottom: 7 }}>{t("DID THEY PAY?")}</div>
 
                   {split === null ? (
                     <>
                       <div style={{ display: "flex", gap: 8 }}>
                         <Btn variant="quiet" disabled={busy} icon={Banknote}
                           onClick={() => onSettle("cash", true, discount, null, customer)}
-                          style={{ flex: 1, background: "#221E15", color: C.cream, borderColor: "#221E15" }}>Cash</Btn>
+                          style={{ flex: 1, background: "#221E15", color: C.cream, borderColor: "#221E15" }}>{t("Cash")}</Btn>
                         <Btn variant="solid" disabled={busy} icon={CreditCard}
                           onClick={() => onSettle("card", true, discount, null, customer)}
-                          style={{ flex: 1 }}>Card</Btn>
+                          style={{ flex: 1 }}>{t("Card")}</Btn>
                       </div>
                       <Btn variant="bare" onClick={() => setSplit({ cash: round2(total / 2), card: round2(total - round2(total / 2)) })}
                         style={{ width: "100%", marginTop: 6, color: "#6B6250" }}>
-                        Split between cash and card
+                        {t("Split between cash and card")}
                       </Btn>
                     </>
                   ) : (
@@ -993,9 +1003,9 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
                   )}
                   <Btn variant="ghost" disabled={busy} icon={AlertTriangle} onClick={() => onSettle(null, false, discount, null, null)}
                     style={{ width: "100%", marginTop: 8, color: "#8A5A2E", borderColor: "rgba(0,0,0,0.2)" }}>
-                    Not paid — leave on the tab
+                    {t("Not paid — leave on the tab")}
                   </Btn>
-                  <Btn variant="bare" onClick={() => setPaying(false)} style={{ width: "100%", marginTop: 4, color: "#6B6250" }}>Back</Btn>
+                  <Btn variant="bare" onClick={() => setPaying(false)} style={{ width: "100%", marginTop: 4, color: "#6B6250" }}>{t("Back")}</Btn>
                 </div>
               )}
             </div>
@@ -1003,6 +1013,77 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
         </div>
       </div>
     </div>
+  );
+}
+
+/* Why something came off the table.
+
+   Kept to one tap for the cases that are almost all of them. Friction here is
+   the point — but friction that takes six taps gets worked around, and a
+   control staff resent is a control that stops being used honestly. */
+const VOID_REASONS = [
+  { reason: "Wrong order", kind: "void" },
+  { reason: "Changed their mind", kind: "void" },
+  { reason: "Spilled or remade", kind: "void" },
+  { reason: "On the house", kind: "comp" },
+  { reason: "Staff drink", kind: "comp" },
+];
+
+function VoidReason({ line, qty, cur, onCancel, onConfirm, busy }) {
+  const [other, setOther] = useState("");
+  const [otherKind, setOtherKind] = useState("void");
+
+  return (
+    <Modal onClose={onCancel} width={360}>
+      <div style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 16 }}>
+        Taking off {qty > 1 ? `${qty} × ` : ""}{line.name}
+      </div>
+      <div style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim, marginTop: 4, marginBottom: 14 }}>
+        {money(line.price * qty, cur)} · already on the table, so it needs a reason
+      </div>
+
+      <div style={{ display: "grid", gap: 8 }}>
+        {VOID_REASONS.map((r) => (
+          <button key={r.reason} disabled={busy}
+            onClick={() => onConfirm(r.reason, r.kind)}
+            style={{
+              display: "flex", alignItems: "center", gap: 10, padding: "12px 14px",
+              borderRadius: 11, cursor: busy ? "not-allowed" : "pointer", textAlign: "left",
+              border: `1px solid ${r.kind === "comp" ? C.brassDim : C.line}`,
+              background: r.kind === "comp" ? C.a08 : C.raise,
+              color: C.cream, fontFamily: SANS, fontSize: 13.5, fontWeight: 600,
+            }}>
+            {r.reason}
+            {r.kind === "comp" && (
+              <span style={{ marginLeft: "auto", fontFamily: SANS, fontSize: 10.5,
+                letterSpacing: "0.12em", color: C.brass }}>GIVEN AWAY</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 14 }}>
+        <Field label="Or say why" value={other} onChange={setOther} placeholder="…" />
+        <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
+          {[["void", "Not served"], ["comp", "Given away"]].map(([k, label]) => (
+            <button key={k} onClick={() => setOtherKind(k)} style={{
+              padding: "6px 11px", borderRadius: 99, cursor: "pointer",
+              border: `1px solid ${otherKind === k ? C.brass : C.line}`,
+              background: otherKind === k ? C.a10 : "transparent",
+              color: otherKind === k ? C.brass : C.sage,
+              fontFamily: SANS, fontSize: 12, fontWeight: 600,
+            }}>{label}</button>
+          ))}
+          <Btn variant="solid" size="sm" disabled={busy || !other.trim()}
+            style={{ marginLeft: "auto" }}
+            onClick={() => onConfirm(other.trim(), otherKind)}>Confirm</Btn>
+        </div>
+      </div>
+
+      <Btn variant="ghost" style={{ width: "100%", marginTop: 14 }} onClick={onCancel}>
+        Keep it on the bill
+      </Btn>
+    </Modal>
   );
 }
 
@@ -1035,7 +1116,7 @@ function SplitByItems({ lines, cur, onCancel, onConfirm, busy }) {
   return (
     <div>
       <div style={{ fontFamily: MONO, fontSize: 10.5, letterSpacing: "0.16em", color: "#8A7F66", marginBottom: 8 }}>
-        WHAT ARE THEY PAYING FOR?
+        {t("WHAT ARE THEY PAYING FOR?")}
       </div>
 
       <div style={{ maxHeight: 200, overflowY: "auto", marginBottom: 10 }}>
@@ -1070,7 +1151,7 @@ function SplitByItems({ lines, cur, onCancel, onConfirm, busy }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
         padding: "8px 0", borderTop: "1px solid rgba(0,0,0,0.15)" }}>
         <span style={{ fontFamily: MONO, fontSize: 11, letterSpacing: "0.14em", color: "#6B6250" }}>
-          THIS GUEST
+          {t("THIS GUEST")}
         </span>
         <span style={{ fontFamily: MONO, fontSize: 22, fontWeight: 700, color: "#1A1608" }}>
           {money(total, cur)}
@@ -1081,12 +1162,12 @@ function SplitByItems({ lines, cur, onCancel, onConfirm, busy }) {
       </div>
 
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <Btn variant="bare" onClick={onCancel} style={{ flex: 1, color: "#6B6250" }}>Back</Btn>
+        <Btn variant="bare" onClick={onCancel} style={{ flex: 1, color: "#6B6250" }}>{t("Back")}</Btn>
         <Btn variant="quiet" disabled={busy || !chosen.length} icon={Banknote}
           onClick={() => onConfirm(chosen, "cash")}
-          style={{ flex: 1, background: "#221E15", color: C.cream, borderColor: "#221E15" }}>Cash</Btn>
+          style={{ flex: 1, background: "#221E15", color: C.cream, borderColor: "#221E15" }}>{t("Cash")}</Btn>
         <Btn variant="solid" disabled={busy || !chosen.length} icon={CreditCard}
-          onClick={() => onConfirm(chosen, "card")} style={{ flex: 1 }}>Card</Btn>
+          onClick={() => onConfirm(chosen, "card")} style={{ flex: 1 }}>{t("Card")}</Btn>
       </div>
     </div>
   );
@@ -1130,7 +1211,7 @@ function SplitTender({ total, cur, split, setSplit, onCancel, onConfirm, busy })
       </div>
 
       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-        <Btn variant="bare" onClick={onCancel} style={{ flex: 1, color: "#6B6250" }}>Back</Btn>
+        <Btn variant="bare" onClick={onCancel} style={{ flex: 1, color: "#6B6250" }}>{t("Back")}</Btn>
         <Btn variant="solid" disabled={busy || !ok} onClick={onConfirm} icon={Receipt} style={{ flex: 2 }}>
           Take {money(split.cash, cur)} cash
         </Btn>
@@ -1590,7 +1671,7 @@ function SplitList({ rows, cur, nameKey = "name", valueKey = "gross", sub }) {
   );
 }
 
-function Reports({ venue, report, products, productsLoading, loading, mode, setMode, anchor, setAnchor, unpaid, onSettleUnpaid, onExport, exporting, actions, onTestPrinter, onRetryFiscal, onReset,
+function Reports({ venue, report, products, productsLoading, loading, mode, setMode, anchor, setAnchor, unpaid, onSettleUnpaid, onExport, exporting, actions, onTestPrinter, onRetryFiscal, onReset, voids,
   drawer, onCash, onDrawer, onX, onZ }) {
   const cur = venue.currency;
   const t = report?.totals || {};
@@ -1703,8 +1784,8 @@ function Reports({ venue, report, products, productsLoading, loading, mode, setM
               </span>
               <span style={{ fontFamily: MONO, fontSize: 15, color: C.cream }}>{money(b.total, cur)}</span>
               <div style={{ display: "flex", gap: 6 }}>
-                <Btn size="sm" icon={Banknote} onClick={() => onSettleUnpaid(b.id, "cash")}>Cash</Btn>
-                <Btn size="sm" variant="solid" icon={CreditCard} onClick={() => onSettleUnpaid(b.id, "card")}>Card</Btn>
+                <Btn size="sm" icon={Banknote} onClick={() => onSettleUnpaid(b.id, "cash")}>{t("Cash")}</Btn>
+                <Btn size="sm" variant="solid" icon={CreditCard} onClick={() => onSettleUnpaid(b.id, "card")}>{t("Card")}</Btn>
               </div>
             </div>
           ))}
@@ -1733,6 +1814,8 @@ function Reports({ venue, report, products, productsLoading, loading, mode, setM
       </div>
 
       <ProductsSold rows={products} loading={productsLoading} cur={cur} />
+
+      <VoidsCard voids={voids} cur={cur} />
 
       <DrawerCard drawer={report?.drawer} cur={cur} onCash={onCash} />
 
@@ -2141,6 +2224,85 @@ function CashCardStat({ cash, card, cur }) {
 
    Deliberately not inside the printer panel: a bar with no fiscal printer
    still has a drawer, and this is the figure an owner reconciles against. */
+/* What came off tables, and who took it off.
+
+   The per-waiter column is the one an owner studies. A waiter voiding far more
+   than the others proves nothing on its own — people get given the difficult
+   tables — but it is where to look, and before this existed there was nowhere
+   to look at all. */
+function VoidsCard({ voids, cur }) {
+  const [open, setOpen] = useState(false);
+  const v = voids || {};
+  const voidValue = Number(v.voidValue) || 0;
+  const compValue = Number(v.compValue) || 0;
+  const anything = (Number(v.voidCount) || 0) + (Number(v.compCount) || 0) > 0;
+
+  if (!anything) return null;
+
+  return (
+    <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, marginTop: 16 }}>
+      <button onClick={() => setOpen(!open)} style={{
+        width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "14px 18px",
+        background: "transparent", border: "none", cursor: "pointer", textAlign: "left", flexWrap: "wrap",
+      }}>
+        <AlertTriangle size={15} color={C.sageDim} />
+        <span style={{ fontFamily: SANS, fontSize: 13.5, fontWeight: 600, color: C.cream }}>
+          Taken off tables
+        </span>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 14, alignItems: "baseline" }}>
+          <span style={{ fontFamily: MONO, fontSize: 14, color: C.cream }}>
+            {money(voidValue, cur)}
+            <span style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim }}> not served</span>
+          </span>
+          <span style={{ fontFamily: MONO, fontSize: 14, color: C.brass }}>
+            {money(compValue, cur)}
+            <span style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim }}> given away</span>
+          </span>
+        </span>
+        <ChevronRight size={16} color={C.sageDim}
+          style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform 150ms" }} />
+      </button>
+
+      {open && (
+        <div style={{ padding: "0 18px 18px", display: "grid", gap: 16 }}>
+          <div>
+            <Eyebrow style={{ marginBottom: 8 }}>By waiter</Eyebrow>
+            <SplitList rows={v.byStaff || []} cur={cur} sub={(r) => `${r.qty} items`} />
+          </div>
+          <div>
+            <Eyebrow style={{ marginBottom: 8 }}>Why</Eyebrow>
+            <SplitList rows={(v.byReason || []).map((r) => ({ ...r, name: r.reason }))}
+              cur={cur} valueKey="value" sub={(r) => `${r.qty}`} />
+          </div>
+          {(v.recent || []).length > 0 && (
+            <div>
+              <Eyebrow style={{ marginBottom: 8 }}>Most recent</Eyebrow>
+              <div style={{ display: "grid", gap: 6, maxHeight: 220, overflowY: "auto" }}>
+                {v.recent.map((r, i) => (
+                  <div key={i} style={{ display: "flex", gap: 10, alignItems: "baseline",
+                    fontFamily: SANS, fontSize: 12.5, color: C.sage, flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: MONO, fontSize: 11.5, color: C.sageDim, width: 42 }}>
+                      {new Date(r.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                    <span style={{ color: C.cream }}>{r.qty > 1 ? `${r.qty} × ` : ""}{r.name}</span>
+                    <span style={{ color: C.sageDim }}>
+                      table {r.table} · {r.staff} · {r.reason}
+                    </span>
+                    <span style={{ marginLeft: "auto", fontFamily: MONO,
+                      color: r.kind === "comp" ? C.brass : C.sage }}>
+                      {money(Number(r.value) || 0, cur)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DrawerCard({ drawer, cur, onCash }) {
   const d = drawer || {};
   const expected = Number(d.expected) || 0;
@@ -2515,7 +2677,7 @@ function Team({ venue, staff: allStaff, events, flash, actions }) {
 
 /* --------------------------------------------------------------- branding */
 
-function Branding({ venue, flash, actions }) {
+function Branding({ venue, flash, actions, onLanguage }) {
   const [accent, setAccent] = useState(venue.brandAccent || DEFAULT_BRAND.accent);
   const [surface, setSurface] = useState(venue.brandSurface || DEFAULT_BRAND.surface);
   const [busy, setBusy] = useState(false);
@@ -2575,6 +2737,25 @@ function Branding({ venue, flash, actions }) {
           <Btn variant="bare" icon={Trash2} disabled={busy} style={{ color: C.sageDim }}
             onClick={() => actions.removeLogo()} />
         )}
+      </div>
+
+      {/* language */}
+      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, padding: 16 }}>
+        <Eyebrow style={{ marginBottom: 10 }}>Language</Eyebrow>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {Object.entries(LANGUAGES).map(([code, l]) => (
+            <button key={code} onClick={() => onLanguage(code)} style={{
+              padding: "9px 14px", borderRadius: 10, cursor: "pointer",
+              border: `1px solid ${venue.language === code ? C.brass : C.line}`,
+              background: venue.language === code ? C.a10 : "transparent",
+              color: venue.language === code ? C.brass : C.sage,
+              fontFamily: SANS, fontSize: 13, fontWeight: 600,
+            }}>{l.name}</button>
+          ))}
+        </div>
+        <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim, marginTop: 10, lineHeight: 1.45 }}>
+          What your staff see on the floor. Changes as soon as you pick it.
+        </div>
       </div>
 
       {/* surface */}
@@ -3103,12 +3284,12 @@ function UpdateChip() {
       fontFamily: SANS, fontSize: 13, fontWeight: 700,
       boxShadow: "0 10px 40px -10px rgba(0,0,0,0.8)",
     }}>
-      <RotateCw size={15} /> New version ready — tap to update
+      <RotateCw size={15} /> {t("New version ready — tap to update")}
     </button>
   );
 }
 
-function Splash({ text = "Opening the floor…" }) {
+function Splash({ text = t("Opening the floor…") }) {
   return (
     <div style={{ minHeight: "100vh", background: C.ink, display: "grid", placeItems: "center", padding: 24 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, color: C.sageDim, fontFamily: SANS, fontSize: 14 }}>
@@ -3155,6 +3336,11 @@ export default function App() {
   const now = useNow(20000);
   const installPrompt = useInstallPrompt();
   const [logoStamp, setLogoStamp] = useState(1);
+
+  /* Language. Held in state so switching re-renders; the actual lookup is a
+     module-level function, which keeps it out of every component's props. */
+  const [lang, setLangState] = useState(() => recallLang());
+  useEffect(() => { setLang(lang); }, [lang]);
 
   /* In a small bar the owner works the floor. They can already take orders —
      nothing ever stopped them — but six admin tabs mid-service is the wrong
@@ -3224,6 +3410,12 @@ export default function App() {
   }, [zones, zoneId]);
 
   useEffect(() => {
+    // A bar sets the language its staff read; the device only decides before
+    // anyone has signed in.
+    if (venue?.language && venue.language !== lang) setLangState(venue.language);
+  }, [venue?.language]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     if (!venue) return;
     const brand = { accent: venue.brandAccent, surface: venue.brandSurface };
     applyTheme(brand);
@@ -3247,6 +3439,7 @@ export default function App() {
     try {
       const bar = await pairDevice(code);
       setPaired(bar);
+      if (bar.language) setLangState(bar.language);
       const brand = { accent: bar.accent, surface: bar.surface };
       applyTheme(brand);
       rememberBrand(brand);
@@ -3318,6 +3511,7 @@ export default function App() {
       return ok;
     },
     saveBranding: (b) => guard((c) => api.setBranding(c, venue.id, b)),
+    setLanguage: (code) => guard((c) => api.setLanguage(c, venue.id, code)),
     saveFiscal: (cfg) => guard((c) => api.setFiscalConfig(c, venue.id, cfg), "Printer settings saved"),
     uploadLogo: async (file) => {
       const ok = await guard((c) => api.uploadLogo(c, venue.id, file));
@@ -3353,6 +3547,26 @@ export default function App() {
       flash(res === "queued"
         ? `Table ${table.label} saved on this device — will sync`
         : `Table ${table.label} saved`);
+      return true;
+    } catch (e) { flash(e.message); return false; }
+    finally { setSheetBusy(false); }
+  };
+
+  /* Taking something off a saved table. Goes through the outbox like every
+     other write, so a void taken with no signal still reaches the record. */
+  const voidLine = async (line, qty, reason, kind) => {
+    if (!openOrder || !line.id) return flash("Save the order first.");
+    setSheetBusy(true);
+    try {
+      await write(
+        "order.void",
+        { orderId: openOrder.id, lineId: line.id, qty, reason, kind },
+        (c) => api.voidOrderLine(c, { lineId: line.id, qty, reason, kind })
+      );
+      setSheetSync((n) => n + 1);
+      flash(kind === "comp"
+        ? `${line.name} on the house — ${money(line.price * qty, venue.currency)}`
+        : `${line.name} taken off — ${reason}`);
       return true;
     } catch (e) { flash(e.message); return false; }
     finally { setSheetBusy(false); }
@@ -3547,6 +3761,7 @@ export default function App() {
   const [unpaid, setUnpaid] = useState([]);
   const [reportLoading, setReportLoading] = useState(false);
   const [products, setProducts] = useState([]);
+  const [voids, setVoids] = useState(null);
   const [productsLoading, setProductsLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
 
@@ -3556,14 +3771,16 @@ export default function App() {
     if (!client || !venue || session?.role !== "owner") return;
     setReportLoading(true); setProductsLoading(true);
     try {
-      const [rep, un, prod] = await Promise.all([
+      const [rep, un, prod, vd] = await Promise.all([
         api.loadReport(client, venue.id, range.from, range.to, mode === "day" ? "hour" : "day"),
         api.loadUnpaidBills(client, venue.id),
         api.loadProductsSold(client, venue.id, range.from, range.to),
+        api.loadVoids(client, venue.id, range.from, range.to),
       ]);
       setReport(rep);
       setUnpaid(un);
       setProducts(prod || []);
+      setVoids(vd || null);
     } catch (e) { flash(e.message); }
     finally { setReportLoading(false); setProductsLoading(false); }
   }, [client, venue, session, range.from, range.to, mode, flash]);
@@ -3669,7 +3886,7 @@ export default function App() {
 
   /* With nothing open, one press warns rather than closing. A tablet on a bar
      wall gets knocked, and losing the floor mid-service isn't acceptable. */
-  useExitGuard(() => flash("Press back again to leave Backbar"));
+  useExitGuard(() => flash(t("Press back again to leave Backbar")));
 
   /* ---- render ---- */
 
@@ -3691,7 +3908,7 @@ export default function App() {
     );
   }
 
-  if (booting) return <Splash text="Starting up…" />;
+  if (booting) return <Splash text={t("Starting up…")} />;
 
   if (!session) {
     return (
@@ -3827,7 +4044,7 @@ export default function App() {
               }}
             >
               {serving ? <LayoutList size={14} /> : <Martini size={14} />}
-              {serving ? "Manage" : "Serve"}
+              {serving ? t("Manage") : t("Serve")}
             </button>
           )}
 
@@ -3835,10 +4052,10 @@ export default function App() {
             <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: 12.5, fontWeight: 700, color: C.cream, lineHeight: 1.2 }}>{session.actorName}</div>
               <div style={{ fontSize: 10, color: serving ? C.brass : C.sageDim, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                {isPlatform ? "You" : isOwner ? (serving ? "Serving" : "Bar owner") : "Waiter"}
+                {isPlatform ? "You" : isOwner ? (serving ? t("Serving") : t("Bar owner")) : t("Waiter")}
               </div>
             </div>
-            <Btn size="sm" variant="bare" icon={LogOut} title="Sign out" onClick={doSignOut} />
+            <Btn size="sm" variant="bare" icon={LogOut} title={t("Sign out")} onClick={doSignOut} />
           </div>
         </div>
 
@@ -3882,7 +4099,7 @@ export default function App() {
                   </button>
                 );
               })}
-              <span style={{ marginLeft: "auto", fontFamily: SANS, fontSize: 12, color: C.sageDim }}>Tap a table to take the order</span>
+              <span style={{ marginLeft: "auto", fontFamily: SANS, fontSize: 12, color: C.sageDim }}>{t("Tap a table to take the order")}</span>
             </div>
 
             {zone.tables.length === 0 ? (
@@ -3901,7 +4118,7 @@ export default function App() {
 
             {openHere.length > 0 && (
               <div style={{ marginTop: 20 }}>
-                <Eyebrow style={{ marginBottom: 10 }}>Open bills</Eyebrow>
+                <Eyebrow style={{ marginBottom: 10 }}>{t("Open bills")}</Eyebrow>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(190px,1fr))", gap: 10 }}>
                   {openHere.slice().sort((a, b) => a.openedAt - b.openedAt).map((o) => {
                     const tot = o.lines.reduce((s, l) => s + l.price * l.qty, 0);
@@ -3951,7 +4168,7 @@ export default function App() {
             unpaid={unpaid} onSettleUnpaid={settleUnpaid}
             onExport={exportCsv} exporting={exporting}
             actions={barActions} onTestPrinter={testPrinter} onRetryFiscal={retryFiscal}
-            onReset={openReset} drawer={drawer} onCash={doCash} onDrawer={doDrawer}
+            onReset={openReset} voids={voids} drawer={drawer} onCash={doCash} onDrawer={doDrawer}
             onX={doXReport} onZ={doZReport}
           />
         )}
@@ -3959,7 +4176,8 @@ export default function App() {
           <Team venue={venue} staff={data.staff || []} events={securityEvents} flash={flash} actions={barActions} />
         )}
         {isOwner && currentTab === "brand" && (
-          <Branding venue={venue} flash={flash} actions={barActions} />
+          <Branding venue={venue} flash={flash} actions={barActions}
+            onLanguage={(code) => { setLangState(code); barActions.setLanguage(code); }} />
         )}
       </main>
 
@@ -3976,6 +4194,7 @@ export default function App() {
           onCommit={commitOrder}
           onSettle={settleOrder}
           onPayPart={payPart}
+          onVoid={voidLine}
         />
       )}
 

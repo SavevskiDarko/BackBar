@@ -209,6 +209,7 @@ export default {
           return json({
             barId: row.bar_id, barName: row.bar_name,
             accent: row.accent, surface: row.surface, logoPath: row.logo_path,
+            language: row.language,
           }, 200, cors);
         } catch (e) {
           await rpc(env, "login_record", { p_bar_code: barCode, p_ip: ip, p_ok: false });
