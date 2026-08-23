@@ -1734,9 +1734,11 @@ function Reports({ venue, report, products, productsLoading, loading, mode, setM
 
       <ProductsSold rows={products} loading={productsLoading} cur={cur} />
 
+      <DrawerCard drawer={report?.drawer} cur={cur} onCash={onCash} />
+
       <FiscalPanel venue={venue} actions={actions} onTest={onTestPrinter}
         onRetryAll={onRetryFiscal} stuck={att.noFiscal || 0}
-        drawer={drawer} onCash={onCash} onDrawer={onDrawer} onX={onX} onZ={onZ} />
+        drawer={drawer} onDrawer={onDrawer} onX={onX} onZ={onZ} />
 
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16, padding: "14px 18px",
         background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, flexWrap: "wrap" }}>
@@ -1949,7 +1951,7 @@ function ProductsSold({ rows, loading, cur }) {
   );
 }
 
-function FiscalPanel({ venue, actions, onTest, onRetryAll, stuck, drawer, onCash, onDrawer, onX, onZ }) {
+function FiscalPanel({ venue, actions, onTest, onRetryAll, stuck, drawer, onDrawer, onX, onZ }) {
   const [open, setOpen] = useState(false);
   const [cfg, setCfg] = useState({
     enabled: venue.fiscalEnabled || false,
@@ -2070,8 +2072,6 @@ function FiscalPanel({ venue, actions, onTest, onRetryAll, stuck, drawer, onCash
               )}
 
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Btn icon={Wallet} onClick={() => onCash("in")}>Cash in</Btn>
-                <Btn icon={Wallet} onClick={() => onCash("out")}>Cash out</Btn>
                 <Btn icon={Banknote} onClick={onDrawer}>Open drawer</Btn>
                 <Btn variant="ghost" icon={BarChart3} onClick={onX}>X report</Btn>
                 <Btn variant="danger" icon={CalendarClock} onClick={onZ} style={{ marginLeft: "auto" }}>
@@ -2132,6 +2132,40 @@ function CashCardStat({ cash, card, cur }) {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/* What should physically be in the till right now. Cash taken, plus anything
+   paid in, minus anything paid out — the number to count against at close.
+
+   Deliberately not inside the printer panel: a bar with no fiscal printer
+   still has a drawer, and this is the figure an owner reconciles against. */
+function DrawerCard({ drawer, cur, onCash }) {
+  const d = drawer || {};
+  const expected = Number(d.expected) || 0;
+  const moves = (Number(d.paidIn) || 0) > 0 || (Number(d.paidOut) || 0) > 0;
+
+  return (
+    <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14,
+      padding: "16px 18px", marginTop: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <Eyebrow>Should be in the drawer</Eyebrow>
+          <div style={{ fontFamily: MONO, fontSize: 26, fontWeight: 600, color: C.cream,
+            marginTop: 8, letterSpacing: "-0.02em" }}>
+            {money(expected, cur)}
+          </div>
+          <div style={{ fontFamily: SANS, fontSize: 12, color: C.sageDim, marginTop: 4, lineHeight: 1.5 }}>
+            {money(Number(d.cashSales) || 0, cur)} taken in cash
+            {moves && <> · {money(Number(d.paidIn) || 0, cur)} in · {money(Number(d.paidOut) || 0, cur)} out</>}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn size="sm" icon={Wallet} onClick={() => onCash("in")}>Cash in</Btn>
+          <Btn size="sm" icon={Wallet} onClick={() => onCash("out")}>Cash out</Btn>
+        </div>
+      </div>
     </div>
   );
 }
