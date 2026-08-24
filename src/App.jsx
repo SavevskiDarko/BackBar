@@ -610,7 +610,7 @@ function FloorPlan({ zone, orders, venueId, mode, selectedId, onSelect, onMove, 
 
 /* -------------------------------------------------------------- order sheet */
 
-function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, onSettle, onPayPart, now, canSeeCost, canDiscount, actorName, busy, startOn = "menu", syncToken = 0 }) {
+function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, onSettle, onPayPart, onVoid, now, canSeeCost, canDiscount, actorName, busy, startOn = "menu", syncToken = 0 }) {
   const [lines, setLines] = useState(order ? order.lines.map((l) => ({ ...l })) : []);
   const [guests, setGuests] = useState(order ? order.guests : table.seats || 2);
   const [cat, setCat] = useState("All");
@@ -620,6 +620,7 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
   // Part cash, part card is ordinary in a bar. Null means a single tender.
   const [split, setSplit] = useState(null);      // { cash, card }
   const [partial, setPartial] = useState(false); // one guest settling early
+  const [voiding, setVoiding] = useState(null);  // { line, qty } awaiting a reason
 
   const [customer, setCustomer] = useState(null); // { taxId, name }
   const narrow = useNarrow();
@@ -672,8 +673,29 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
     if (i >= 0) { const n = [...prev]; n[i] = { ...n[i], qty: n[i].qty + 1 }; return n; }
     return [...prev, { articleId: a.id, name: a.name, category: a.category, price: a.price, cost: a.cost, qty: 1 }];
   });
-  const bump = (id, d) => setLines((prev) => prev.map((l) => (l.articleId === id ? { ...l, qty: l.qty + d } : l)).filter((l) => l.qty > 0));
-  const remove = (id) => setLines((prev) => prev.filter((l) => l.articleId !== id));
+  /* Is this line already saved to the table? If so it is accountable: taking it
+     off needs a reason. Anything typed since the last save is just typing. */
+  const savedQty = (articleId) =>
+    (order?.lines || []).find((l) => l.articleId === articleId)?.qty || 0;
+
+  const bump = (id, d) => {
+    const line = lines.find((l) => l.articleId === id);
+    if (!line) return;
+    // Going below what the table already has is a removal, not an edit.
+    if (d < 0 && savedQty(id) > 0 && line.qty <= savedQty(id)) {
+      setVoiding({ line, qty: 1 });
+      return;
+    }
+    setLines((prev) => prev.map((l) => (l.articleId === id ? { ...l, qty: l.qty + d } : l)).filter((l) => l.qty > 0));
+  };
+
+  const remove = (id) => {
+    const line = lines.find((l) => l.articleId === id);
+    if (!line) return;
+    const saved = savedQty(id);
+    if (saved > 0) { setVoiding({ line, qty: Math.min(line.qty, saved) }); return; }
+    setLines((prev) => prev.filter((l) => l.articleId !== id));
+  };
 
   return (
     <div
