@@ -27,6 +27,7 @@ function friendly(msg = "") {
   if (msg.includes("confirmation_does_not_match")) return "The name you typed doesn't match.";
   if (msg.includes("article_not_on_this_bars_list")) return "That item isn't on this bar's price list.";
   if (msg.includes("must keep one active owner")) return "A bar must keep one active owner.";
+  if (msg.includes("unknown_ingredient")) return "That ingredient no longer exists.";
   if (msg.includes("reason_required")) return "Pick a reason first.";
   if (msg.includes("nothing_selected")) return "Pick what they're paying for first.";
   if (msg.includes("more_than_is_on_the_table")) return "That's more than the table ordered.";
@@ -131,14 +132,76 @@ export async function payPartOfOrder(client, { orderId, billId, lines, method, p
 
 /** Take something off a saved table. A reason is required — the database
     enforces it, so nothing that talks to the API can skip it. */
-export async function voidOrderLine(client, { lineId, qty, reason, kind = "void" }) {
+export async function voidOrderLine(client, { lineId, qty, reason, kind = "void", consumed = false }) {
   return unwrap(await client.rpc("void_order_line", {
-    p_line: lineId, p_qty: qty, p_reason: reason, p_kind: kind,
+    p_line: lineId, p_qty: qty, p_reason: reason, p_kind: kind, p_consumed: consumed,
   }));
 }
 
 export async function loadVoids(client, barId, from, to) {
   return unwrap(await client.rpc("bar_voids", { p_bar: barId, p_from: from, p_to: to }));
+}
+
+/* ------------------------------------------------------------------- stock */
+
+export async function loadStock(client, barId) {
+  return unwrap(await client.rpc("bar_stock", { p_bar: barId }));
+}
+
+export async function saveIngredient(client, barId, ing) {
+  const row = {
+    bar_id: barId,
+    name: ing.name,
+    unit: ing.unit || "ml",
+    pack_size: Number(ing.packSize) || 0,
+    pack_cost: Number(ing.packCost) || 0,
+    par_level: Number(ing.parLevel) || 0,
+    supplier: ing.supplier || null,
+  };
+  const q = ing.id
+    ? client.from("ingredients").update(row).eq("id", ing.id).select().single()
+    : client.from("ingredients").insert(row).select().single();
+  return unwrap(await q);
+}
+
+export async function removeIngredient(client, id) {
+  // Soft: movements and recipes still reference it, and history should survive.
+  unwrap(await client.from("ingredients").update({ active: false }).eq("id", id));
+}
+
+export async function loadRecipe(client, articleId) {
+  return unwrap(await client.rpc("article_recipe", { p_article: articleId }));
+}
+
+export async function saveRecipe(client, articleId, items) {
+  return unwrap(await client.rpc("set_recipe", {
+    p_article: articleId,
+    p_items: items.map((i) => ({ ingredientId: i.ingredientId, qty: Number(i.qty) || 0 })),
+  }));
+}
+
+export async function receiveDelivery(client, barId, items, note) {
+  return unwrap(await client.rpc("receive_delivery", {
+    p_bar: barId,
+    p_items: items.map((i) => ({
+      ingredient_id: i.ingredientId,
+      packs: Number(i.packs) || 0,
+      pack_cost: i.packCost === "" || i.packCost == null ? null : Number(i.packCost),
+    })),
+    p_note: note || null,
+  }));
+}
+
+export async function recordStocktake(client, barId, counts, note) {
+  return unwrap(await client.rpc("record_stocktake", {
+    p_bar: barId,
+    p_counts: counts.map((c) => ({ ingredient_id: c.ingredientId, counted: Number(c.counted) || 0 })),
+    p_note: note || null,
+  }));
+}
+
+export async function loadVariance(client, barId, from, to) {
+  return unwrap(await client.rpc("bar_variance", { p_bar: barId, p_from: from, p_to: to }));
 }
 
 export async function recordCashMovement(client, barId, { kind, amount, reason, fiscalRef }) {
@@ -179,7 +242,8 @@ export const outboxHandlers = {
     }),
   "order.cancel": (client, p) => cancelOrder(client, p.orderId),
   "order.void": (client, p) =>
-    voidOrderLine(client, { lineId: p.lineId, qty: p.qty, reason: p.reason, kind: p.kind }),
+    voidOrderLine(client, { lineId: p.lineId, qty: p.qty, reason: p.reason,
+      kind: p.kind, consumed: p.consumed }),
 };
 
 /** Owner settling something a waiter marked unpaid. */

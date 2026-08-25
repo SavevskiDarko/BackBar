@@ -4,6 +4,7 @@ import {
   RectangleHorizontal, Users, Clock, CreditCard, Banknote, Search, ChevronRight,
   Copy, Save, Receipt, RotateCw, Loader2, Wine, ListOrdered, LogOut, Delete,
   ChevronLeft, Palette, ImageIcon, Printer, Martini, LayoutList, CalendarClock,
+  Package, TruckIcon, ClipboardCheck,
   ShieldCheck, UserPlus, AlertTriangle, ArrowLeft, KeyRound, Pause, Play, Wallet,
 } from "lucide-react";
 
@@ -707,8 +708,8 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
         <VoidReason
           line={voiding.line} qty={voiding.qty} cur={venue.currency} busy={busy}
           onCancel={() => setVoiding(null)}
-          onConfirm={async (reason, kind) => {
-            const ok = await onVoid(voiding.line, voiding.qty, reason, kind);
+          onConfirm={async (reason, kind, consumed) => {
+            const ok = await onVoid(voiding.line, voiding.qty, reason, kind, consumed);
             if (ok) setVoiding(null);
           }}
         />
@@ -1043,12 +1044,15 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
    Kept to one tap for the cases that are almost all of them. Friction here is
    the point — but friction that takes six taps gets worked around, and a
    control staff resent is a control that stops being used honestly. */
+/* `consumed` decides whether stock moved. A drink that was poured and then
+   spilled came off the shelf; one rung up in error never left the bottle.
+   Without this distinction the variance report blames the wrong thing. */
 const VOID_REASONS = [
-  { reason: "Wrong order", kind: "void" },
-  { reason: "Changed their mind", kind: "void" },
-  { reason: "Spilled or remade", kind: "void" },
-  { reason: "On the house", kind: "comp" },
-  { reason: "Staff drink", kind: "comp" },
+  { reason: "Wrong order",        kind: "void", consumed: false },
+  { reason: "Changed their mind", kind: "void", consumed: false },
+  { reason: "Spilled or remade",  kind: "void", consumed: true  },
+  { reason: "On the house",       kind: "comp", consumed: true  },
+  { reason: "Staff drink",        kind: "comp", consumed: true  },
 ];
 
 function VoidReason({ line, qty, cur, onCancel, onConfirm, busy }) {
@@ -1067,7 +1071,7 @@ function VoidReason({ line, qty, cur, onCancel, onConfirm, busy }) {
       <div style={{ display: "grid", gap: 8 }}>
         {VOID_REASONS.map((r) => (
           <button key={r.reason} disabled={busy}
-            onClick={() => onConfirm(r.reason, r.kind)}
+            onClick={() => onConfirm(r.reason, r.kind, r.consumed)}
             style={{
               display: "flex", alignItems: "center", gap: 10, padding: "12px 14px",
               borderRadius: 11, cursor: busy ? "not-allowed" : "pointer", textAlign: "left",
@@ -1098,7 +1102,7 @@ function VoidReason({ line, qty, cur, onCancel, onConfirm, busy }) {
           ))}
           <Btn variant="solid" size="sm" disabled={busy || !other.trim()}
             style={{ marginLeft: "auto" }}
-            onClick={() => onConfirm(other.trim(), otherKind)}>Confirm</Btn>
+            onClick={() => onConfirm(other.trim(), otherKind, otherKind === "comp")}>Confirm</Btn>
         </div>
       </div>
 
@@ -1389,7 +1393,7 @@ function Designer({ venue, zones, zoneId, setZoneId, orders, now, flash, actions
 
 /* --------------------------------------------------------------- price list */
 
-function PriceList({ articles, currency, actions }) {
+function PriceList({ articles, currency, actions, ingredients = [] }) {
   const [q, setQ] = useState("");
   const [hover, setHover] = useState(null);
   // A six-column table needs 440px before the name gets any width at all. On a
@@ -1397,6 +1401,20 @@ function PriceList({ articles, currency, actions }) {
   const narrow = useNarrow("(max-width: 620px)");
   const [cat, setCat] = useState("All");
   const [editing, setEditing] = useState(null);
+  const [recipe, setRecipe] = useState(null);
+  const [recipeBusy, setRecipeBusy] = useState(false);
+
+  /* Fetch the recipe when an existing article is opened. A new one has none
+     until it's been saved and has an id to hang ingredients off. */
+  useEffect(() => {
+    let alive = true;
+    if (!editing?.id) { setRecipe(null); return; }
+    setRecipeBusy(true);
+    actions.loadRecipe(editing.id).then((r) => { if (alive) setRecipe(r); })
+      .finally(() => alive && setRecipeBusy(false));
+    return () => { alive = false; };
+  }, [editing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const cats = useMemo(() => ["All", ...Array.from(new Set(articles.map((a) => a.category)))], [articles]);
   const shown = articles.filter((a) => (cat === "All" || a.category === cat) && (!q || a.name.toLowerCase().includes(q.toLowerCase())));
   const avgMargin = articles.length ? articles.reduce((s, a) => s + (a.price ? (a.price - a.cost) / a.price : 0), 0) / articles.length : 0;
@@ -1547,6 +1565,19 @@ function PriceList({ articles, currency, actions }) {
               <span style={{ fontFamily: MONO, fontSize: 13, color: C.brass }}>{money(Number(editing.price || 0) - Number(editing.cost || 0), currency)}</span>
             </div>
           </div>
+          {editing.id && (
+            <RecipeEditor
+              article={editing} ingredients={ingredients} recipe={recipe}
+              cur={currency} busy={recipeBusy}
+              onChange={async (items) => {
+                setRecipeBusy(true);
+                const r = await actions.saveRecipe(editing.id, items);
+                if (r) { setRecipe(r); setEditing({ ...editing, cost: Number(r.cost) || 0 }); }
+                setRecipeBusy(false);
+              }}
+            />
+          )}
+
           <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
             {editing.id && (
               <Btn variant="danger" icon={Trash2} onClick={() => { actions.removeArticle(editing.id); setEditing(null); }} />
@@ -2849,6 +2880,360 @@ function Branding({ venue, flash, actions, onLanguage }) {
   );
 }
 
+/* ------------------------------------------------------------------- stock */
+
+const UNIT_LABEL = { ml: "ml", g: "g", piece: "each" };
+
+/* A bar buys in packs and pours in millilitres. Showing both — "4.2 bottles"
+   next to "2,940 ml" — is the difference between a number an owner can act on
+   and one they have to do arithmetic on. */
+function packsLabel(item) {
+  if (item.unit === "piece") return `${Math.round(item.in_stock)} left`;
+  const packs = Number(item.packs) || 0;
+  return `${packs.toFixed(1)} × ${Number(item.pack_size)}${UNIT_LABEL[item.unit]}`;
+}
+
+/* What a drink is made of. Lives in the article editor because that is where
+   an owner already goes to think about a drink — and because the cost it
+   computes replaces the number they would otherwise have to invent. */
+function RecipeEditor({ article, ingredients, recipe, cur, onChange, busy }) {
+  const [adding, setAdding] = useState(false);
+  const items = recipe?.items || [];
+  const cost = items.reduce((a, i) => a + (Number(i.lineCost) || 0), 0);
+  const margin = article.price > 0 ? ((article.price - cost) / article.price) * 100 : 0;
+
+  const set = (ingredientId, qty) =>
+    onChange(items
+      .map((i) => (i.ingredientId === ingredientId ? { ...i, qty } : i))
+      .filter((i) => Number(i.qty) > 0));
+
+  const add = (ing) => {
+    if (items.some((i) => i.ingredientId === ing.id)) return setAdding(false);
+    onChange([...items, { ingredientId: ing.id, name: ing.name, unit: ing.unit, qty: 30 }]);
+    setAdding(false);
+  };
+
+  return (
+    <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 14, paddingTop: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+        <Package size={14} color={C.sageDim} />
+        <Eyebrow>What goes in it</Eyebrow>
+        {busy && <Loader2 size={12} color={C.sageDim} className="animate-spin" />}
+      </div>
+
+      {!ingredients.length ? (
+        <div style={{ fontFamily: SANS, fontSize: 12, color: C.sageDim, lineHeight: 1.5, marginTop: 6 }}>
+          Add what you buy under Stock first — bottles, kegs, cases — then a
+          recipe here works out what this drink costs.
+        </div>
+      ) : (
+        <>
+          <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+            {items.map((i) => (
+              <div key={i.ingredientId} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ flex: 1, minWidth: 0, fontFamily: SANS, fontSize: 13, color: C.cream,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.name}</span>
+                <input type="number" inputMode="decimal" value={i.qty}
+                  onChange={(e) => set(i.ingredientId, e.target.value)}
+                  style={{ width: 68, background: C.ink, border: `1px solid ${C.line}`, borderRadius: 8,
+                    padding: "7px 9px", color: C.cream, fontFamily: MONO, fontSize: 13,
+                    textAlign: "right", outline: "none" }} />
+                <span style={{ fontFamily: MONO, fontSize: 11.5, color: C.sageDim, width: 30 }}>
+                  {UNIT_LABEL[i.unit] || ""}
+                </span>
+                <span style={{ fontFamily: MONO, fontSize: 12, color: C.sage, width: 62, textAlign: "right" }}>
+                  {money(Number(i.lineCost) || 0, cur)}
+                </span>
+                <button onClick={() => set(i.ingredientId, 0)}
+                  style={{ background: "none", border: "none", cursor: "pointer", color: C.sageDim, padding: 2 }}>
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {adding ? (
+            <div style={{ marginTop: 10, maxHeight: 160, overflowY: "auto", display: "grid", gap: 4 }}>
+              {ingredients.filter((g) => !items.some((i) => i.ingredientId === g.id)).map((g) => (
+                <button key={g.id} onClick={() => add(g)} style={{
+                  textAlign: "left", padding: "8px 10px", borderRadius: 8, cursor: "pointer",
+                  background: C.raise, border: `1px solid ${C.line}`, color: C.cream,
+                  fontFamily: SANS, fontSize: 12.5,
+                }}>{g.name}</button>
+              ))}
+            </div>
+          ) : (
+            <Btn size="sm" icon={Plus} style={{ marginTop: 10 }} onClick={() => setAdding(true)}>
+              Add an ingredient
+            </Btn>
+          )}
+
+          {items.length > 0 && (
+            <div style={{ background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9,
+              padding: "10px 12px", marginTop: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontFamily: SANS, fontSize: 12, color: C.sageDim }}>Costs to make</span>
+                <span style={{ fontFamily: MONO, fontSize: 13.5, color: C.cream }}>{money(cost, cur)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+                <span style={{ fontFamily: SANS, fontSize: 12, color: C.sageDim }}>
+                  Sells at {money(article.price, cur)} — margin
+                </span>
+                <span style={{ fontFamily: MONO, fontSize: 13.5,
+                  color: margin > 65 ? C.mint : margin > 40 ? C.brass : C.copper }}>
+                  {margin.toFixed(0)}%
+                </span>
+              </div>
+              <div style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim, marginTop: 6, lineHeight: 1.45 }}>
+                This replaces the buy price — it is worked out from the recipe, so
+                it follows your supplier prices on its own.
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function IngredientEditor({ ing, cur, onCancel, onSave, onRemove }) {
+  const [v, setV] = useState(ing);
+  const unitCost = Number(v.packSize) > 0 ? Number(v.packCost) / Number(v.packSize) : 0;
+
+  return (
+    <Modal onClose={onCancel} width={380}>
+      <div style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 16, marginBottom: 14 }}>
+        {v.id ? "Edit ingredient" : "New ingredient"}
+      </div>
+
+      <div style={{ display: "grid", gap: 12 }}>
+        <Field label="Name" value={v.name} onChange={(x) => setV({ ...v, name: x })}
+          placeholder="Campari" />
+
+        <div>
+          <Eyebrow style={{ marginBottom: 6 }}>Measured in</Eyebrow>
+          <div style={{ display: "flex", gap: 8 }}>
+            {[["ml", "Millilitres"], ["g", "Grams"], ["piece", "Pieces"]].map(([u, label]) => (
+              <button key={u} onClick={() => setV({ ...v, unit: u })} style={{
+                flex: 1, padding: "9px 6px", borderRadius: 10, cursor: "pointer",
+                border: `1px solid ${v.unit === u ? C.brass : C.line}`,
+                background: v.unit === u ? C.a10 : "transparent",
+                color: v.unit === u ? C.brass : C.sage,
+                fontFamily: SANS, fontSize: 12, fontWeight: 600,
+              }}>{label}</button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <Field label={v.unit === "piece" ? "Units per case" : `${UNIT_LABEL[v.unit]} per pack`}
+            type="number" mono value={v.packSize} onChange={(x) => setV({ ...v, packSize: x })} />
+          <Field label="What a pack costs" type="number" step="0.01" mono suffix={curOf(cur).sign}
+            value={v.packCost} onChange={(x) => setV({ ...v, packCost: x })} />
+        </div>
+
+        {/* The number that makes a recipe cost anything. Shown per pour rather
+            than per millilitre, because nobody thinks in millilitre-prices. */}
+        <div style={{ background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9,
+          padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <span style={{ fontFamily: SANS, fontSize: 12, color: C.sageDim }}>
+            {v.unit === "piece" ? "Each costs" : "A 3cl pour costs"}
+          </span>
+          <span style={{ fontFamily: MONO, fontSize: 14, color: C.brass }}>
+            {money(v.unit === "piece" ? unitCost : unitCost * 30, cur)}
+          </span>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <Field label={`Reorder at (${UNIT_LABEL[v.unit]})`} type="number" mono
+            value={v.parLevel} onChange={(x) => setV({ ...v, parLevel: x })} />
+          <Field label="Supplier" value={v.supplier} onChange={(x) => setV({ ...v, supplier: x })} />
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
+        {v.id && <Btn variant="danger" icon={Trash2} onClick={onRemove} />}
+        <Btn variant="ghost" style={{ flex: 1 }} onClick={onCancel}>Cancel</Btn>
+        <Btn variant="solid" icon={Check} style={{ flex: 1 }}
+          disabled={!v.name.trim() || !(Number(v.packSize) > 0)}
+          onClick={() => onSave({ ...v, name: v.name.trim() })}>Save</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+/* Deliveries and stocktakes are the same shape: a number against each
+   ingredient. Sharing one sheet keeps them consistent and halves the code. */
+function StockSheet({ mode, items, onCancel, onSubmit }) {
+  const [vals, setVals] = useState({});
+  const [note, setNote] = useState("");
+  const [q, setQ] = useState("");
+  const delivery = mode === "delivery";
+
+  const shown = items.filter((i) => !q || i.name.toLowerCase().includes(q.toLowerCase()));
+  const filled = Object.entries(vals).filter(([, v]) => v !== "" && v != null);
+
+  const rows = filled.map(([id, v]) =>
+    delivery ? { ingredientId: id, packs: v } : { ingredientId: id, counted: v });
+
+  return (
+    <Modal onClose={onCancel} width={440}>
+      <div style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 16 }}>
+        {delivery ? "Stock arriving" : "Counting the shelf"}
+      </div>
+      <div style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim, marginTop: 4, marginBottom: 12, lineHeight: 1.5 }}>
+        {delivery
+          ? "How many packs came in. Leave the rest blank."
+          : "What is actually there, in the unit shown. The difference against what the books expect is recorded — that difference is the point of counting."}
+      </div>
+
+      <div style={{ position: "relative", marginBottom: 10 }}>
+        <Search size={14} color={C.sageDim} style={{ position: "absolute", left: 11, top: 11 }} />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find an ingredient"
+          style={{ width: "100%", background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9,
+            padding: "9px 12px 9px 32px", color: C.cream, fontFamily: SANS, fontSize: 13, outline: "none" }} />
+      </div>
+
+      <div style={{ maxHeight: 300, overflowY: "auto", display: "grid", gap: 6 }}>
+        {shown.map((i) => (
+          <div key={i.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontFamily: SANS, fontSize: 13, color: C.cream, overflow: "hidden",
+                textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.name}</div>
+              <div style={{ fontFamily: MONO, fontSize: 11, color: C.sageDim }}>
+                {delivery
+                  ? `${Number(i.pack_size)}${UNIT_LABEL[i.unit]} per pack`
+                  : `books say ${Math.round(Number(i.in_stock))}${UNIT_LABEL[i.unit]}`}
+              </div>
+            </div>
+            <input type="number" inputMode="decimal"
+              value={vals[i.id] ?? ""} placeholder={delivery ? "packs" : UNIT_LABEL[i.unit]}
+              onChange={(e) => setVals({ ...vals, [i.id]: e.target.value })}
+              style={{ width: 92, background: C.ink, border: `1px solid ${C.line}`, borderRadius: 8,
+                padding: "8px 10px", color: C.cream, fontFamily: MONO, fontSize: 13,
+                textAlign: "right", outline: "none" }} />
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 12 }}>
+        <Field label="Note" value={note} onChange={setNote}
+          placeholder={delivery ? "invoice number" : "Monday count"} />
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+        <Btn variant="ghost" style={{ flex: 1 }} onClick={onCancel}>Cancel</Btn>
+        <Btn variant="solid" icon={Check} style={{ flex: 2 }} disabled={!rows.length}
+          onClick={() => onSubmit(rows, note)}>
+          {delivery ? `Receive ${rows.length}` : `Save count of ${rows.length}`}
+        </Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function Stock({ venue, stock, loading, actions }) {
+  const cur = venue.currency;
+  const [editing, setEditing] = useState(null);
+  const [mode, setMode] = useState(null);     // 'delivery' | 'count'
+  const [q, setQ] = useState("");
+
+  const items = (stock?.items || []).filter(
+    (i) => !q || i.name.toLowerCase().includes(q.toLowerCase()));
+  const low = (stock?.items || []).filter((i) => i.low);
+
+  return (
+    <div style={{ maxWidth: 940 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 16 }}>
+        <Stat label="Stock on hand" value={money(Number(stock?.totalValue) || 0, cur)}
+          sub={`${(stock?.items || []).length} ingredients`} />
+        <Stat label="Running low" value={stock?.lowCount ?? 0}
+          accent={(stock?.lowCount || 0) > 0 ? C.copper : C.cream}
+          sub={low.length ? low.slice(0, 3).map((i) => i.name).join(", ") : "nothing to reorder"} />
+        <Stat label="Drinks with no recipe" value={stock?.noRecipe ?? 0}
+          accent={(stock?.noRecipe || 0) > 0 ? C.brass : C.mint}
+          sub={(stock?.noRecipe || 0) > 0 ? "their cost is guesswork" : "every drink is costed"} />
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ position: "relative", flex: "1 1 180px" }}>
+          <Search size={14} color={C.sageDim} style={{ position: "absolute", left: 11, top: 11 }} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find an ingredient"
+            style={{ width: "100%", background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9,
+              padding: "9px 12px 9px 32px", color: C.cream, fontFamily: SANS, fontSize: 13, outline: "none" }} />
+        </div>
+        <Btn icon={TruckIcon} onClick={() => setMode("delivery")}>Delivery</Btn>
+        <Btn icon={ClipboardCheck} onClick={() => setMode("count")}>Count</Btn>
+        <Btn variant="solid" icon={Plus}
+          onClick={() => setEditing({ id: null, name: "", unit: "ml", packSize: 700, packCost: 0, parLevel: 0, supplier: "" })}>
+          Ingredient
+        </Btn>
+        {loading && <Loader2 size={14} color={C.sageDim} className="animate-spin" />}
+      </div>
+
+      <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14, overflow: "hidden" }}>
+        {items.map((i) => (
+          <div key={i.id} onClick={() => setEditing({
+            id: i.id, name: i.name, unit: i.unit, packSize: i.pack_size,
+            packCost: i.pack_cost, parLevel: i.par_level, supplier: i.supplier || "",
+          })}
+            style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px",
+              borderBottom: `1px solid ${C.lineFade}`, cursor: "pointer", flexWrap: "wrap" }}>
+            <div style={{ minWidth: 0, flex: "1 1 140px" }}>
+              <div style={{ fontFamily: SANS, fontSize: 14, color: C.cream }}>{i.name}</div>
+              <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim, marginTop: 2 }}>
+                {money(Number(i.pack_cost), cur)} per {Number(i.pack_size)}{UNIT_LABEL[i.unit]}
+                {i.used_in > 0 ? ` · in ${i.used_in} drink${i.used_in > 1 ? "s" : ""}` : " · not used yet"}
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontFamily: MONO, fontSize: 14, color: i.low ? C.copper : C.cream }}>
+                {packsLabel(i)}
+              </div>
+              <div style={{ fontFamily: MONO, fontSize: 11.5, color: C.sageDim, marginTop: 2 }}>
+                {money(Number(i.value), cur)}
+              </div>
+            </div>
+            {i.low && (
+              <span style={{ fontFamily: SANS, fontSize: 10.5, fontWeight: 700, letterSpacing: "0.1em",
+                color: C.copper, border: `1px solid ${C.copper}55`, borderRadius: 99, padding: "2px 8px" }}>
+                LOW
+              </span>
+            )}
+            <ChevronRight size={16} color={C.sageDim} />
+          </div>
+        ))}
+        {!items.length && (
+          <div style={{ padding: 22, fontFamily: SANS, fontSize: 13, color: C.sageDim, lineHeight: 1.6 }}>
+            {q ? "Nothing matches." : (
+              <>Nothing here yet. Add what you buy — a bottle, a keg, a case — then
+              give each drink a recipe. Once both exist, every sale takes stock off
+              the shelf on its own and the cost of a drink stops being a guess.</>
+            )}
+          </div>
+        )}
+      </div>
+
+      {editing && (
+        <IngredientEditor ing={editing} cur={cur} onCancel={() => setEditing(null)}
+          onSave={async (v) => { const ok = await actions.saveIngredient(v); if (ok) setEditing(null); }}
+          onRemove={async () => { await actions.removeIngredient(editing.id); setEditing(null); }} />
+      )}
+
+      {mode && (
+        <StockSheet mode={mode} items={stock?.items || []}
+          onCancel={() => setMode(null)}
+          onSubmit={async (rows, note) => {
+            const ok = mode === "delivery"
+              ? await actions.receiveDelivery(rows, note)
+              : await actions.recordStocktake(rows, note);
+            if (ok) setMode(null);
+          }} />
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------ platform side */
 
 function AdminBars({ venues, todayByBar, now, openAsOwner, flash, actions, loading }) {
@@ -3534,6 +3919,37 @@ export default function App() {
     },
     saveBranding: (b) => guard((c) => api.setBranding(c, venue.id, b)),
     setLanguage: (code) => guard((c) => api.setLanguage(c, venue.id, code)),
+
+    saveIngredient: async (v) => {
+      const ok = await guard((c) => api.saveIngredient(c, venue.id, v), "Saved");
+      if (ok) loadStock();
+      return ok;
+    },
+    removeIngredient: async (id) => {
+      const ok = await guard((c) => api.removeIngredient(c, id));
+      if (ok) loadStock();
+      return ok;
+    },
+    receiveDelivery: async (rows, note) => {
+      const ok = await guard((c) => api.receiveDelivery(c, venue.id, rows, note),
+        `${rows.length} received — costs updated`);
+      if (ok) { loadStock(); refresh(); }
+      return ok;
+    },
+    recordStocktake: async (rows, note) => {
+      const res = await guard((c) => api.recordStocktake(c, venue.id, rows, note));
+      if (res) {
+        loadStock();
+        const off = (res.lines || []).length;
+        // The difference is the whole reason for counting, so say it out loud.
+        flash(off
+          ? `${off} ingredient${off > 1 ? "s" : ""} didn't match — ${money(Math.abs(Number(res.value) || 0), venue.currency)} of variance`
+          : "Everything matched the books");
+      }
+      return res;
+    },
+    saveRecipe: (articleId, items) => guard((c) => api.saveRecipe(c, articleId, items)),
+    loadRecipe: (articleId) => api.loadRecipe(client, articleId).catch(() => null),
     saveFiscal: (cfg) => guard((c) => api.setFiscalConfig(c, venue.id, cfg), "Printer settings saved"),
     uploadLogo: async (file) => {
       const ok = await guard((c) => api.uploadLogo(c, venue.id, file));
@@ -3576,14 +3992,14 @@ export default function App() {
 
   /* Taking something off a saved table. Goes through the outbox like every
      other write, so a void taken with no signal still reaches the record. */
-  const voidLine = async (line, qty, reason, kind) => {
+  const voidLine = async (line, qty, reason, kind, consumed) => {
     if (!openOrder || !line.id) return flash("Save the order first.");
     setSheetBusy(true);
     try {
       await write(
         "order.void",
-        { orderId: openOrder.id, lineId: line.id, qty, reason, kind },
-        (c) => api.voidOrderLine(c, { lineId: line.id, qty, reason, kind })
+        { orderId: openOrder.id, lineId: line.id, qty, reason, kind, consumed },
+        (c) => api.voidOrderLine(c, { lineId: line.id, qty, reason, kind, consumed })
       );
       setSheetSync((n) => n + 1);
       flash(kind === "comp"
@@ -3784,6 +4200,21 @@ export default function App() {
   const [reportLoading, setReportLoading] = useState(false);
   const [products, setProducts] = useState([]);
   const [voids, setVoids] = useState(null);
+  const [stock, setStock] = useState(null);
+  const [stockLoading, setStockLoading] = useState(false);
+
+  const loadStock = useCallback(async () => {
+    if (!client || !venue || session?.role !== "owner") return;
+    setStockLoading(true);
+    try { setStock(await api.loadStock(client, venue.id)); }
+    catch (e) { flash(e.message); }
+    finally { setStockLoading(false); }
+  }, [client, venue, session, flash]);
+
+  // Price list needs the ingredient list too, for recipes.
+  useEffect(() => {
+    if (tab === "stock" || tab === "menu") loadStock();
+  }, [tab, loadStock]);
   const [productsLoading, setProductsLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
 
@@ -3969,7 +4400,7 @@ export default function App() {
   const tabs = isPlatform
     ? [["bars", "Bars & billing", Store]]
     : isOwner && !serving
-    ? [["floor", "Floor", LayoutGrid], ["design", "Floor designer", Copy], ["menu", "Price list", ListOrdered], ["reports", "Money", BarChart3], ["team", "Team", Users], ["brand", "Branding", Palette]]
+    ? [["floor", "Floor", LayoutGrid], ["design", "Floor designer", Copy], ["menu", "Price list", ListOrdered], ["reports", "Money", BarChart3], ["stock", "Stock", Package], ["team", "Team", Users], ["brand", "Branding", Palette]]
     : [["floor", "Floor", LayoutGrid]];
   const currentTab = tabs.some((t) => t[0] === tab) ? tab : tabs[0][0];
 
@@ -4180,7 +4611,8 @@ export default function App() {
             orders={ordersByTable} now={now} flash={flash} actions={barActions} />
         )}
         {isOwner && currentTab === "menu" && (
-          <PriceList articles={articles} currency={venue.currency} actions={barActions} />
+          <PriceList articles={articles} currency={venue.currency} actions={barActions}
+            ingredients={stock?.items || []} />
         )}
         {isOwner && currentTab === "reports" && (
           <Reports
@@ -4193,6 +4625,9 @@ export default function App() {
             onReset={openReset} voids={voids} drawer={drawer} onCash={doCash} onDrawer={doDrawer}
             onX={doXReport} onZ={doZReport}
           />
+        )}
+        {isOwner && currentTab === "stock" && (
+          <Stock venue={venue} stock={stock} loading={stockLoading} actions={barActions} />
         )}
         {isOwner && currentTab === "team" && (
           <Team venue={venue} staff={data.staff || []} events={securityEvents} flash={flash} actions={barActions} />
