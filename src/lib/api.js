@@ -27,6 +27,9 @@ function friendly(msg = "") {
   if (msg.includes("confirmation_does_not_match")) return "The name you typed doesn't match.";
   if (msg.includes("article_not_on_this_bars_list")) return "That item isn't on this bar's price list.";
   if (msg.includes("must keep one active owner")) return "A bar must keep one active owner.";
+  if (msg.includes("table_already_open")) return "That table already has an open bill.";
+  if (msg.includes("same_table")) return "That's the same table.";
+  if (msg.includes("unknown_shift")) return "That shift has already been closed.";
   if (msg.includes("unknown_ingredient")) return "That ingredient no longer exists.";
   if (msg.includes("reason_required")) return "Pick a reason first.";
   if (msg.includes("nothing_selected")) return "Pick what they're paying for first.";
@@ -141,6 +144,30 @@ export async function voidOrderLine(client, { lineId, qty, reason, kind = "void"
 export async function loadVoids(client, barId, from, to) {
   return unwrap(await client.rpc("bar_voids", { p_bar: barId, p_from: from, p_to: to }));
 }
+
+/* ------------------------------------------------------------------ shifts */
+
+export const myShift = (client, barId) =>
+  client.rpc("my_shift", { p_bar: barId }).then(unwrap);
+
+export const openShift = (client, barId, float) =>
+  client.rpc("open_shift", { p_bar: barId, p_float: Number(float) || 0 }).then(unwrap);
+
+export const closeShift = (client, shiftId, declared, note) =>
+  client.rpc("close_shift", {
+    p_shift: shiftId, p_declared: Number(declared) || 0, p_note: note || null,
+  }).then(unwrap);
+
+export const loadShifts = (client, barId, from, to) =>
+  client.rpc("bar_shifts", { p_bar: barId, p_from: from, p_to: to }).then(unwrap);
+
+/* ------------------------------------------------------------ moving tables */
+
+export const transferOrder = (client, orderId, tableId) =>
+  client.rpc("transfer_order", { p_order: orderId, p_table: tableId }).then(unwrap);
+
+export const mergeOrders = (client, fromOrderId, intoOrderId) =>
+  client.rpc("merge_orders", { p_from: fromOrderId, p_into: intoOrderId }).then(unwrap);
 
 /* ------------------------------------------------------------------- stock */
 

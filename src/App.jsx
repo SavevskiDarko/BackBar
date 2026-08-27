@@ -4,7 +4,7 @@ import {
   RectangleHorizontal, Users, Clock, CreditCard, Banknote, Search, ChevronRight,
   Copy, Save, Receipt, RotateCw, Loader2, Wine, ListOrdered, LogOut, Delete,
   ChevronLeft, Palette, ImageIcon, Printer, Martini, LayoutList, CalendarClock,
-  Package, TruckIcon, ClipboardCheck,
+  Package, TruckIcon, ClipboardCheck, MoveRight,
   ShieldCheck, UserPlus, AlertTriangle, ArrowLeft, KeyRound, Pause, Play, Wallet,
 } from "lucide-react";
 
@@ -611,7 +611,7 @@ function FloorPlan({ zone, orders, venueId, mode, selectedId, onSelect, onMove, 
 
 /* -------------------------------------------------------------- order sheet */
 
-function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, onSettle, onPayPart, onVoid, now, canSeeCost, canDiscount, actorName, busy, startOn = "menu", syncToken = 0 }) {
+function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, onSettle, onPayPart, onVoid, onMove, now, canSeeCost, canDiscount, actorName, busy, startOn = "menu", syncToken = 0 }) {
   const [lines, setLines] = useState(order ? order.lines.map((l) => ({ ...l })) : []);
   const [guests, setGuests] = useState(order ? order.guests : table.seats || 2);
   const [cat, setCat] = useState("All");
@@ -741,6 +741,16 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
             <span style={{ fontFamily: MONO, color: C.cream, width: 18, textAlign: "center" }}>{guests}</span>
             <Btn size="sm" variant="bare" onClick={() => setGuests(guests + 1)} icon={Plus} />
           </div>
+          {/* Shown whenever the table has anything on it. If it hasn't been
+              saved yet there is no server order to move, so save first — the
+              waiter shouldn't have to know that distinction exists. */}
+          {(order || lines.length > 0) && (
+            <Btn variant="bare" icon={MoveRight} title="Move or merge this table"
+              onClick={async () => {
+                if (dirty) { const ok = await onCommit(lines, guests, false); if (!ok) return; }
+                onMove();
+              }} />
+          )}
           <Btn variant="bare" icon={X} onClick={onClose} />
         </div>
 
@@ -2880,6 +2890,182 @@ function Branding({ venue, flash, actions, onLanguage }) {
   );
 }
 
+/* Moving a table. A free table is a move; an occupied one is a merge, and the
+   difference matters enough to say out loud before it happens. */
+function MoveTable({ from, zones, orders, cur, onCancel, onMove, onMerge, busy }) {
+  const [confirm, setConfirm] = useState(null);   // an occupied target
+
+  if (confirm) {
+    const total = (confirm.order.lines || []).reduce((a, l) => a + l.price * l.qty, 0);
+    const mine = (from.order?.lines || []).reduce((a, l) => a + l.price * l.qty, 0);
+    return (
+      <Modal onClose={() => setConfirm(null)} width={340}>
+        <div style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 16 }}>
+          Put table {from.label} onto table {confirm.label}?
+        </div>
+        <div style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim, marginTop: 6, marginBottom: 14, lineHeight: 1.5 }}>
+          Both have open bills, so they become one. Table {from.label} closes.
+        </div>
+        <div style={{ background: C.ink, border: `1px solid ${C.line}`, borderRadius: 10,
+          padding: 12, display: "grid", gap: 5, fontFamily: MONO, fontSize: 12.5, color: C.sage }}>
+          <Row2 a={`table ${from.label}`} b={money(mine, cur)} />
+          <Row2 a={`table ${confirm.label}`} b={money(total, cur)} />
+          <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 5, paddingTop: 5 }}>
+            <Row2 a="one bill of" b={money(mine + total, cur)} />
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          <Btn variant="ghost" style={{ flex: 1 }} onClick={() => setConfirm(null)}>Back</Btn>
+          <Btn variant="solid" icon={busy ? Loader2 : Check} style={{ flex: 1 }} disabled={busy}
+            onClick={() => onMerge(confirm.order.id)}>Merge them</Btn>
+        </div>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal onClose={onCancel} width={380}>
+      <div style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 16 }}>
+        Move table {from.label}
+      </div>
+      <div style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim, marginTop: 4, marginBottom: 12 }}>
+        Pick where it's going. A table with its own bill will merge.
+      </div>
+
+      <div style={{ maxHeight: 340, overflowY: "auto", display: "grid", gap: 14 }}>
+        {zones.map((z) => (
+          <div key={z.id}>
+            <Eyebrow style={{ marginBottom: 6 }}>{z.name}</Eyebrow>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(84px,1fr))", gap: 6 }}>
+              {z.tables.filter((t) => t.id !== from.tableId).map((t) => {
+                const o = Object.values(orders).find((x) => x.tableId === t.id);
+                return (
+                  <button key={t.id} disabled={busy}
+                    onClick={() => (o ? setConfirm({ ...t, order: o }) : onMove(t.id))}
+                    style={{
+                      padding: "10px 8px", borderRadius: 10, cursor: "pointer",
+                      border: `1px solid ${o ? C.brassDim : C.line}`,
+                      background: o ? C.a08 : C.raise,
+                      color: C.cream, fontFamily: SANS, fontSize: 13, fontWeight: 600,
+                    }}>
+                    {t.label}
+                    <div style={{ fontFamily: SANS, fontSize: 10.5, fontWeight: 400,
+                      color: o ? C.brass : C.sageDim, marginTop: 2 }}>
+                      {o ? "has a bill" : "free"}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Btn variant="ghost" style={{ width: "100%", marginTop: 14 }} onClick={onCancel}>Cancel</Btn>
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------------------------ shifts */
+
+/* A slim bar above the floor. Waiters live on this screen, so the shift lives
+   here too rather than buried in a menu they'd never open mid-service. */
+function ShiftBar({ shift, cur, onStart, onEnd, busy }) {
+  if (!shift) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14,
+        padding: "10px 14px", borderRadius: 12, background: C.panel,
+        border: `1px solid ${C.line}`, flexWrap: "wrap" }}>
+        <Clock size={14} color={C.sageDim} />
+        <span style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim, flex: 1, minWidth: 140 }}>
+          No shift open. Start one and the cash you take is counted against your name.
+        </span>
+        <Btn size="sm" icon={Clock} disabled={busy} onClick={onStart}>Start shift</Btn>
+      </div>
+    );
+  }
+
+  const since = new Date(shift.openedAt);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14,
+      padding: "10px 14px", borderRadius: 12, background: C.panel,
+      border: `1px solid ${C.brassDim}`, flexWrap: "wrap" }}>
+      <Clock size={14} color={C.brass} />
+      <span style={{ fontFamily: SANS, fontSize: 12.5, color: C.cream }}>
+        Shift since {since.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+      </span>
+      <span style={{ fontFamily: MONO, fontSize: 13.5, color: C.brass }}>
+        {money(Number(shift.expected) || 0, cur)}
+      </span>
+      <span style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>
+        should be in hand · {shift.bills} bill{shift.bills === 1 ? "" : "s"}
+      </span>
+      <Btn size="sm" variant="ghost" disabled={busy} style={{ marginLeft: "auto" }} onClick={onEnd}>
+        End shift
+      </Btn>
+    </div>
+  );
+}
+
+/* Handing over. The declared figure is typed BEFORE the expected one is shown —
+   otherwise it isn't a count, it's a copy. */
+function CashUp({ shift, cur, onCancel, onConfirm, busy }) {
+  const [declared, setDeclared] = useState("");
+  const [note, setNote] = useState("");
+  const [result, setResult] = useState(null);
+
+  if (result) {
+    const off = Number(result.variance) || 0;
+    const good = Math.abs(off) < 0.01;
+    return (
+      <Modal onClose={onCancel} width={340}>
+        <div style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 16, marginBottom: 12 }}>
+          Shift closed
+        </div>
+        <div style={{ display: "grid", gap: 6, fontFamily: MONO, fontSize: 13, color: C.sage }}>
+          <Row2 a="expected" b={money(Number(result.expected_cash) || 0, cur)} />
+          <Row2 a="handed over" b={money(Number(result.declared_cash) || 0, cur)} />
+          <div style={{ borderTop: `1px solid ${C.line}`, marginTop: 6, paddingTop: 6,
+            display: "flex", justifyContent: "space-between",
+            color: good ? C.mint : Math.abs(off) > 200 ? C.copper : C.brass }}>
+            <span>{good ? "exact" : off > 0 ? "over" : "short"}</span>
+            <span>{money(Math.abs(off), cur)}</span>
+          </div>
+        </div>
+        <Btn variant="solid" style={{ width: "100%", marginTop: 16 }} onClick={onCancel}>Done</Btn>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal onClose={onCancel} width={340}>
+      <div style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 16 }}>
+        Ending your shift
+      </div>
+      <div style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim, marginTop: 4, marginBottom: 14, lineHeight: 1.5 }}>
+        Count the cash you're handing over and type it in. What it should be is
+        shown after — a count you can see the answer to isn't a count.
+      </div>
+
+      <Field label="Cash you're handing over" value={declared} onChange={setDeclared}
+        type="number" mono suffix={curOf(cur).sign} />
+      <div style={{ marginTop: 10 }}>
+        <Field label="Anything to note" value={note} onChange={setNote} placeholder="optional" />
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+        <Btn variant="ghost" style={{ flex: 1 }} onClick={onCancel}>Cancel</Btn>
+        <Btn variant="solid" icon={busy ? Loader2 : Check} style={{ flex: 1 }}
+          disabled={busy || declared === ""}
+          onClick={async () => {
+            const r = await onConfirm(declared, note);
+            if (r) setResult(r);
+          }}>Hand over</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 /* ------------------------------------------------------------------- stock */
 
 const UNIT_LABEL = { ml: "ml", g: "g", piece: "each" };
@@ -3949,6 +4135,29 @@ export default function App() {
       return res;
     },
     saveRecipe: (articleId, items) => guard((c) => api.saveRecipe(c, articleId, items)),
+
+    startShift: async () => {
+      const raw = window.prompt("Float going into the drawer? (0 if none)");
+      if (raw === null) return;
+      const ok = await guard((c) => api.openShift(c, venue.id, raw), "Shift started");
+      if (ok) refreshShift();
+    },
+    endShift: async (declared, note) => {
+      const res = await guard((c) => api.closeShift(c, shift.id, declared, note));
+      if (res) { setShift(null); refreshShift(); }
+      return res;
+    },
+
+    moveTable: async (tableId) => {
+      const ok = await guard((c) => api.transferOrder(c, moving.order.id, tableId), "Table moved");
+      if (ok) { setMoving(null); setOpenTableId(null); refresh(); }
+      return ok;
+    },
+    mergeTable: async (intoOrderId) => {
+      const ok = await guard((c) => api.mergeOrders(c, moving.order.id, intoOrderId), "Tables merged");
+      if (ok) { setMoving(null); setOpenTableId(null); refresh(); }
+      return ok;
+    },
     loadRecipe: (articleId) => api.loadRecipe(client, articleId).catch(() => null),
     saveFiscal: (cfg) => guard((c) => api.setFiscalConfig(c, venue.id, cfg), "Printer settings saved"),
     uploadLogo: async (file) => {
@@ -4200,8 +4409,18 @@ export default function App() {
   const [reportLoading, setReportLoading] = useState(false);
   const [products, setProducts] = useState([]);
   const [voids, setVoids] = useState(null);
+  const [shift, setShift] = useState(null);
+  const [cashingUp, setCashingUp] = useState(false);
+  const [moving, setMoving] = useState(null);      // the table being moved
   const [stock, setStock] = useState(null);
   const [stockLoading, setStockLoading] = useState(false);
+
+  const refreshShift = useCallback(async () => {
+    if (!client || !venue || session?.role === "platform") return;
+    try { setShift(await api.myShift(client, venue.id)); } catch { /* not critical */ }
+  }, [client, venue, session]);
+
+  useEffect(() => { refreshShift(); }, [refreshShift]);
 
   const loadStock = useCallback(async () => {
     if (!client || !venue || session?.role !== "owner") return;
@@ -4537,6 +4756,9 @@ export default function App() {
 
         {!isPlatform && currentTab === "floor" && (
           <div>
+            <ShiftBar shift={shift} cur={venue.currency} busy={sheetBusy}
+              onStart={barActions.startShift} onEnd={() => setCashingUp(true)} />
+
             <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
               {zones.map((z) => {
                 const n = z.tables.filter((t) => ordersByTable[`${venue.id}/${t.id}`]).length;
@@ -4652,7 +4874,20 @@ export default function App() {
           onSettle={settleOrder}
           onPayPart={payPart}
           onVoid={voidLine}
+          onMove={() => setMoving({ tableId: table.id, label: table.label, order: openOrder })}
         />
+      )}
+
+      {cashingUp && shift && (
+        <CashUp shift={shift} cur={venue?.currency} busy={sheetBusy}
+          onCancel={() => setCashingUp(false)}
+          onConfirm={(declared, note) => barActions.endShift(declared, note)} />
+      )}
+
+      {moving && (
+        <MoveTable from={moving} zones={zones} orders={orders} cur={venue?.currency} busy={sheetBusy}
+          onCancel={() => setMoving(null)}
+          onMove={barActions.moveTable} onMerge={barActions.mergeTable} />
       )}
 
       {resetPreview && (
