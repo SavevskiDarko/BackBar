@@ -4148,12 +4148,20 @@ export default function App() {
       return res;
     },
 
-    moveTable: async (tableId) => {
+    /* Named for what it does, not for what it moves. `moveTable` was already
+       taken by the floor designer's drag handler, and a duplicate key in this
+       object silently replaced it — dragging a table then called this and
+       failed on a null `moving`. */
+    transferTable: async (tableId) => {
+      // Belt and braces: nothing should reach here without a table in hand,
+      // but a null read here surfaces as a baffling message on the floor.
+      if (!moving?.order?.id) return flash("Nothing to move — open the table first.");
       const ok = await guard((c) => api.transferOrder(c, moving.order.id, tableId), "Table moved");
       if (ok) { setMoving(null); setOpenTableId(null); refresh(); }
       return ok;
     },
     mergeTable: async (intoOrderId) => {
+      if (!moving?.order?.id) return flash("Nothing to merge — open the table first.");
       const ok = await guard((c) => api.mergeOrders(c, moving.order.id, intoOrderId), "Tables merged");
       if (ok) { setMoving(null); setOpenTableId(null); refresh(); }
       return ok;
@@ -4887,7 +4895,7 @@ export default function App() {
       {moving && (
         <MoveTable from={moving} zones={zones} orders={orders} cur={venue?.currency} busy={sheetBusy}
           onCancel={() => setMoving(null)}
-          onMove={barActions.moveTable} onMerge={barActions.mergeTable} />
+          onMove={barActions.transferTable} onMerge={barActions.mergeTable} />
       )}
 
       {resetPreview && (
