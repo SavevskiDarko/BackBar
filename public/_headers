@@ -11,6 +11,11 @@
 /manifest.webmanifest
   Cache-Control: no-cache
 
+# A truthful answer to "what is actually deployed", independent of the app and
+# the service worker. Open it in a browser when a fix seems not to have landed.
+/build-id.txt
+  Cache-Control: no-cache, no-store, must-revalidate
+
 /
   Cache-Control: no-cache
 
