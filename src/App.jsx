@@ -2897,7 +2897,8 @@ function MoveTable({ from, zones, orders, cur, onCancel, onMove, onMerge, busy }
 
   if (confirm) {
     const total = (confirm.order.lines || []).reduce((a, l) => a + l.price * l.qty, 0);
-    const mine = (from.order?.lines || []).reduce((a, l) => a + l.price * l.qty, 0);
+    const own = Object.values(orders).find((x) => x.tableId === from.tableId);
+    const mine = (own?.lines || []).reduce((a, l) => a + l.price * l.qty, 0);
     return (
       <Modal onClose={() => setConfirm(null)} width={340}>
         <div style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 16 }}>
@@ -2962,6 +2963,80 @@ function MoveTable({ from, zones, orders, cur, onCancel, onMove, onMerge, busy }
       </div>
 
       <Btn variant="ghost" style={{ width: "100%", marginTop: 14 }} onClick={onCancel}>Cancel</Btn>
+    </Modal>
+  );
+}
+
+/* ---------------------------------------------------------------- prompting
+
+   Two dialogs that replace window.prompt and window.confirm.
+
+   A browser prompt announces the domain, ignores every style in the app, gives
+   no control over the keyboard, and can't validate or show a currency. On a
+   tablet mounted in a bar it looks like the app has been hijacked by a web
+   page — which, to the person holding it, it has. */
+
+function AmountPrompt({ title, hint, label, cur, note, confirmLabel = "Confirm",
+                        onCancel, onConfirm, busy }) {
+  const [amount, setAmount] = useState("");
+  const [why, setWhy] = useState("");
+  const n = Number(String(amount).replace(",", "."));
+  const ready = amount !== "" && !Number.isNaN(n) && n >= 0;
+
+  return (
+    <Modal onClose={onCancel} width={330}>
+      <div style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 16 }}>{title}</div>
+      {hint && (
+        <div style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim, marginTop: 4, lineHeight: 1.5 }}>
+          {hint}
+        </div>
+      )}
+
+      <div style={{ marginTop: 14 }}>
+        <Eyebrow style={{ marginBottom: 6 }}>{label}</Eyebrow>
+        <div style={{ display: "flex", alignItems: "center", gap: 8,
+          background: C.ink, border: `1px solid ${C.line}`, borderRadius: 11, padding: "4px 14px" }}>
+          <input
+            autoFocus type="number" inputMode="decimal" step="any" min="0"
+            value={amount} onChange={(e) => setAmount(e.target.value)}
+            placeholder="0"
+            onKeyDown={(e) => { if (e.key === "Enter" && ready) onConfirm(n, why || null); }}
+            style={{ flex: 1, minWidth: 0, background: "transparent", border: "none", outline: "none",
+              color: C.cream, fontFamily: MONO, fontSize: 26, fontWeight: 600, padding: "10px 0" }} />
+          <span style={{ fontFamily: MONO, fontSize: 15, color: C.sageDim }}>{curOf(cur).sign}</span>
+        </div>
+      </div>
+
+      {note && (
+        <div style={{ marginTop: 12 }}>
+          <Field label={note} value={why} onChange={setWhy} placeholder="optional" />
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
+        <Btn variant="ghost" style={{ flex: 1 }} onClick={onCancel}>Cancel</Btn>
+        <Btn variant="solid" icon={busy ? Loader2 : Check} style={{ flex: 1 }}
+          disabled={busy || !ready} onClick={() => onConfirm(n, why || null)}>
+          {confirmLabel}
+        </Btn>
+      </div>
+    </Modal>
+  );
+}
+
+function Confirm({ title, body, confirmLabel = "Yes", danger, onCancel, onConfirm, busy }) {
+  return (
+    <Modal onClose={onCancel} width={340}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+        {danger && <AlertTriangle size={19} color={C.copper} />}
+        <span style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 16 }}>{title}</span>
+      </div>
+      <div style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim, lineHeight: 1.55 }}>{body}</div>
+      <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
+        <Btn variant="ghost" style={{ flex: 1 }} onClick={onCancel}>Cancel</Btn>
+        <Btn variant={danger ? "danger" : "solid"} icon={busy ? Loader2 : Check} style={{ flex: 1 }}
+          disabled={busy} onClick={onConfirm}>{confirmLabel}</Btn>
+      </div>
     </Modal>
   );
 }
@@ -4136,11 +4211,11 @@ export default function App() {
     },
     saveRecipe: (articleId, items) => guard((c) => api.saveRecipe(c, articleId, items)),
 
-    startShift: async () => {
-      const raw = window.prompt("Float going into the drawer? (0 if none)");
-      if (raw === null) return;
-      const ok = await guard((c) => api.openShift(c, venue.id, raw), "Shift started");
+    startShift: () => setPrompt({ kind: "float" }),
+    openShiftWith: async (amount) => {
+      const ok = await guard((c) => api.openShift(c, venue.id, amount), "Shift started");
       if (ok) refreshShift();
+      return ok;
     },
     endShift: async (declared, note) => {
       const res = await guard((c) => api.closeShift(c, shift.id, declared, note));
@@ -4153,16 +4228,20 @@ export default function App() {
        object silently replaced it — dragging a table then called this and
        failed on a null `moving`. */
     transferTable: async (tableId) => {
-      // Belt and braces: nothing should reach here without a table in hand,
-      // but a null read here surfaces as a baffling message on the floor.
-      if (!moving?.order?.id) return flash("Nothing to move — open the table first.");
-      const ok = await guard((c) => api.transferOrder(c, moving.order.id, tableId), "Table moved");
+      /* Resolved now, not when the button was tapped. The Move button saves an
+         unsaved table first, and a callback created before that save captured
+         a null order — which is how "nothing to move" appeared on a table that
+         plainly had drinks on it. */
+      const o = Object.values(orders).find((x) => x.tableId === moving?.tableId);
+      if (!o?.id) return flash("Nothing to move — open the table first.");
+      const ok = await guard((c) => api.transferOrder(c, o.id, tableId), "Table moved");
       if (ok) { setMoving(null); setOpenTableId(null); refresh(); }
       return ok;
     },
     mergeTable: async (intoOrderId) => {
-      if (!moving?.order?.id) return flash("Nothing to merge — open the table first.");
-      const ok = await guard((c) => api.mergeOrders(c, moving.order.id, intoOrderId), "Tables merged");
+      const o = Object.values(orders).find((x) => x.tableId === moving?.tableId);
+      if (!o?.id) return flash("Nothing to merge — open the table first.");
+      const ok = await guard((c) => api.mergeOrders(c, o.id, intoOrderId), "Tables merged");
       if (ok) { setMoving(null); setOpenTableId(null); refresh(); }
       return ok;
     },
@@ -4336,14 +4415,8 @@ export default function App() {
   /* Money into or out of the drawer. It is recorded on the device first — the
      printed slip is the legal record — and only then in our own books, so we
      never claim a movement the device never saw. */
-  const doCash = useCallback(async (kind) => {
-    const label = kind === "in" ? "Cash in — how much?" : "Cash out — how much?";
-    const raw = window.prompt(label);
-    if (raw === null) return;
-    const amount = Number(String(raw).replace(",", "."));
+  const doCash = useCallback(async (kind, amount, reason) => {
     if (!(amount > 0)) return flash("Enter an amount greater than zero");
-    const reason = window.prompt("What is it for? (optional)") || null;
-
     try {
       let ref = null;
       if (venue.fiscalBridgeUrl) {
@@ -4374,7 +4447,6 @@ export default function App() {
 
   /* Z ends the day on the device and cannot be undone, so it asks first. */
   const doZReport = useCallback(async () => {
-    if (!window.confirm("Close the day on the printer? This ends trading and can't be undone.")) return;
     try {
       const r = await fiscal.zReport(venue.fiscalBridgeUrl, venue.fiscalBridgeToken);
       await api.closeBusinessDay(client, venue.id, r.zNumber, r.device).catch(() => {});
@@ -4420,6 +4492,7 @@ export default function App() {
   const [shift, setShift] = useState(null);
   const [cashingUp, setCashingUp] = useState(false);
   const [moving, setMoving] = useState(null);      // the table being moved
+  const [prompt, setPrompt] = useState(null);     // { kind: 'float' | 'cash-in' | 'cash-out' | 'z' }
   const [stock, setStock] = useState(null);
   const [stockLoading, setStockLoading] = useState(false);
 
@@ -4852,8 +4925,10 @@ export default function App() {
             unpaid={unpaid} onSettleUnpaid={settleUnpaid}
             onExport={exportCsv} exporting={exporting}
             actions={barActions} onTestPrinter={testPrinter} onRetryFiscal={retryFiscal}
-            onReset={openReset} voids={voids} drawer={drawer} onCash={doCash} onDrawer={doDrawer}
-            onX={doXReport} onZ={doZReport}
+            onReset={openReset} voids={voids} drawer={drawer}
+            onCash={(kind) => setPrompt({ kind: kind === "in" ? "cash-in" : "cash-out" })}
+            onDrawer={doDrawer}
+            onX={doXReport} onZ={() => setPrompt({ kind: "z" })}
           />
         )}
         {isOwner && currentTab === "stock" && (
@@ -4882,8 +4957,44 @@ export default function App() {
           onSettle={settleOrder}
           onPayPart={payPart}
           onVoid={voidLine}
-          onMove={() => setMoving({ tableId: table.id, label: table.label, order: openOrder })}
+          onMove={() => setMoving({ tableId: table.id, label: table.label })}
         />
+      )}
+
+      {prompt?.kind === "float" && (
+        <AmountPrompt
+          title="Starting your shift" cur={venue?.currency} busy={sheetBusy}
+          hint="How much is going into the drawer to start with? It's counted back at the end, so put 0 if there's no float."
+          label="Opening float" confirmLabel="Start shift"
+          onCancel={() => setPrompt(null)}
+          onConfirm={async (amount) => {
+            const ok = await barActions.openShiftWith(amount);
+            if (ok) setPrompt(null);
+          }} />
+      )}
+
+      {(prompt?.kind === "cash-in" || prompt?.kind === "cash-out") && (
+        <AmountPrompt
+          title={prompt.kind === "cash-in" ? "Money into the drawer" : "Money out of the drawer"}
+          hint={prompt.kind === "cash-in"
+            ? "A float, or change brought in. It's added to what the drawer should hold."
+            : "A supplier paid in cash, or money banked. It comes off what the drawer should hold."}
+          label="How much" note="What it's for" cur={venue?.currency} busy={sheetBusy}
+          confirmLabel={prompt.kind === "cash-in" ? "Pay in" : "Pay out"}
+          onCancel={() => setPrompt(null)}
+          onConfirm={async (amount, reason) => {
+            await doCash(prompt.kind === "cash-in" ? "in" : "out", amount, reason);
+            setPrompt(null);
+          }} />
+      )}
+
+      {prompt?.kind === "z" && (
+        <Confirm
+          danger title="Close the day on the printer?"
+          body="This ends trading for today and can't be undone. Run an X report instead if you only want to see where the till stands."
+          confirmLabel="Close the day" busy={sheetBusy}
+          onCancel={() => setPrompt(null)}
+          onConfirm={async () => { await doZReport(); setPrompt(null); }} />
       )}
 
       {cashingUp && shift && (
