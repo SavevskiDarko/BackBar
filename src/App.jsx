@@ -4069,9 +4069,13 @@ export default function App() {
     if (!venueRaw) return null;
     return { ...venueRaw, logoUrl: client ? api.logoUrl(client, venueRaw.logoPath, logoStamp) : null };
   }, [venueRaw, client, logoStamp]);
-  const zones = data?.zones || [];
-  const articles = data?.articles || [];
-  const orders = data?.orders || {};
+  /* Stable identities. `data?.zones || []` creates a fresh array on every
+     render, so anything depending on it re-runs constantly — and worse, tempts
+     you to leave it out of a dependency array, which is how a hook ends up
+     holding last render's data. */
+  const zones = useMemo(() => data?.zones || [], [data]);
+  const articles = useMemo(() => data?.articles || [], [data]);
+  const orders = useMemo(() => data?.orders || {}, [data]);
 
   useEffect(() => {
     if (zones.length && (!zoneId || !zones.some((z) => z.id === zoneId))) setZoneId(zones[0].id);
@@ -4256,7 +4260,11 @@ export default function App() {
       await api.removeLogo(c, venue.id, venue.logoPath);
       setLogoStamp(Date.now());
     }),
-  }), [guard, client, venue, flash, loadSecurity]);
+    // Every value these actions read has to be listed, or the closure keeps
+    // whatever it saw when the memo last ran. That is exactly how "nothing to
+    // move" appeared on a table with drinks on it.
+  }), [guard, client, venue, flash, loadSecurity, loadStock, refresh, refreshShift,
+       orders, moving?.tableId, shift?.id]);
 
   /* ---- orders: these are the writes that must survive a dead connection ---- */
 
@@ -4479,7 +4487,7 @@ export default function App() {
       flash(done ? `${done} receipt${done > 1 ? "s" : ""} printed` : "Printer still unreachable");
       loadReports();
     } catch (e) { flash(e.message); }
-  }, [client, venue, printFiscal, flash]);
+  }, [client, venue, printFiscal, flash, loadReports]);
 
   /* ---- owner reports ---- */
   const [mode, setMode] = useState("day");

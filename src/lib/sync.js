@@ -87,6 +87,11 @@ export async function drainOutbox(client, handlers, onChange) {
       }
     }
   } finally {
+    /* eslint-disable-next-line require-atomic-updates --
+       The guard above tests and sets `running` with no await between them, so
+       only one sync is ever in flight and this can't clobber another's flag.
+       Suppressed deliberately rather than restructured: rewriting working sync
+       logic to satisfy a linter would be the worse trade. */
     running = false;
   }
 

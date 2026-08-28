@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "deploy": "npm run build && wrangler deploy",
     "tail": "wrangler tail",
-    "prebuild": "node scripts/check-env.mjs"
+    "prebuild": "node scripts/check-env.mjs",
+    "lint": "eslint --no-eslintrc -c .eslintrc.json --resolve-plugins-relative-to . src/",
+    "check": "npm run lint && node scripts/checks.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
@@ -20,6 +22,8 @@
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
     "vite": "^5.4.2",
-    "wrangler": "^4.20.0"
+    "wrangler": "^4.20.0",
+    "eslint": "^8.57.1",
+    "eslint-plugin-react-hooks": "^4.6.2"
   }
 }

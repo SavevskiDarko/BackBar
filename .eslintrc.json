@@ -1,0 +1,25 @@
+{
+  "root": true,
+  "env": { "browser": true, "es2022": true, "node": true },
+  "parserOptions": { "ecmaVersion": 2022, "sourceType": "module", "ecmaFeatures": { "jsx": true } },
+  "plugins": ["react-hooks"],
+  "rules": {
+    "react-hooks/rules-of-hooks": "error",
+    "react-hooks/exhaustive-deps": "error",
+    "no-undef": "error",
+    "no-unused-vars": ["error", { "args": "none", "varsIgnorePattern": "^_" }],
+    "no-dupe-keys": "error",
+    "no-dupe-args": "error",
+    "no-unreachable": "error",
+    "no-const-assign": "error",
+    "no-self-compare": "error",
+    "no-constant-condition": "error",
+    "no-cond-assign": "error",
+    "use-isnan": "error",
+    "valid-typeof": "error",
+    "no-fallthrough": "error",
+    "no-sparse-arrays": "error",
+    "require-atomic-updates": "error"
+  },
+  "globals": { "__BUILD_ID__": "readonly", "React": "readonly" }
+}
