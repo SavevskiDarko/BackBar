@@ -4191,101 +4191,6 @@ export default function App() {
 
   useEffect(() => { if (tab === "team") loadSecurity(); }, [tab, loadSecurity]);
 
-  const barActions = useMemo(() => ({
-    saveTable: (zid, t) => guard((c) => api.upsertTable(c, venue.id, zid, t)),
-    moveTable: (id, x, y) => api.moveTable(client, id, x, y).catch((e) => flash(e.message)),
-    deleteTable: (id) => guard((c) => api.deleteTable(c, id)),
-    saveZone: (z) => guard((c) => api.upsertZone(c, venue.id, z)),
-    deleteZone: (id) => guard((c) => api.deleteZone(c, id)),
-    saveArticle: (a) => guard((c) => api.upsertArticle(c, venue.id, a), "Price list updated"),
-    removeArticle: (id) => guard((c) => api.deleteArticle(c, id), "Article removed"),
-    saveStaff: (s2) => guard((c) => api.upsertStaff(c, venue.id, s2), "Team updated"),
-    resetStaffPin: (id) => guard((c) => api.resetStaffPin(c, id)),
-    removeStaff: (id) => guard((c) => api.deactivateStaff(c, id)),
-    setDiscountPolicy: (v) => guard((c) => api.setDiscountPolicy(c, venue.id, v)),
-    changeOwnPin: async (cur, next) => {
-      const ok = await guard((c) => api.changeOwnPin(c, cur, next), "PIN changed — use the new one next time");
-      if (ok) loadSecurity();
-      return ok;
-    },
-    saveBranding: (b) => guard((c) => api.setBranding(c, venue.id, b)),
-    setLanguage: (code) => guard((c) => api.setLanguage(c, venue.id, code)),
-
-    saveIngredient: async (v) => {
-      const ok = await guard((c) => api.saveIngredient(c, venue.id, v), "Saved");
-      if (ok) loadStock();
-      return ok;
-    },
-    removeIngredient: async (id) => {
-      const ok = await guard((c) => api.removeIngredient(c, id));
-      if (ok) loadStock();
-      return ok;
-    },
-    receiveDelivery: async (rows, note) => {
-      const ok = await guard((c) => api.receiveDelivery(c, venue.id, rows, note),
-        `${rows.length} received — costs updated`);
-      if (ok) { loadStock(); refresh(); }
-      return ok;
-    },
-    recordStocktake: async (rows, note) => {
-      const res = await guard((c) => api.recordStocktake(c, venue.id, rows, note));
-      if (res) {
-        loadStock();
-        const off = (res.lines || []).length;
-        // The difference is the whole reason for counting, so say it out loud.
-        flash(off
-          ? `${off} ingredient${off > 1 ? "s" : ""} didn't match — ${money(Math.abs(Number(res.value) || 0), venue.currency)} of variance`
-          : "Everything matched the books");
-      }
-      return res;
-    },
-    saveRecipe: (articleId, items) => guard((c) => api.saveRecipe(c, articleId, items)),
-
-    startShift: () => setPrompt({ kind: "float" }),
-    openShiftWith: async (amount) => {
-      const ok = await guard((c) => api.openShift(c, venue.id, amount), "Shift started");
-      if (ok) refreshShift();
-      return ok;
-    },
-    endShift: async (declared, note) => {
-      const res = await guard((c) => api.closeShift(c, shift.id, declared, note));
-      if (res) { setShift(null); refreshShift(); }
-      return res;
-    },
-
-    /* Named for what it does, not for what it moves. `moveTable` was already
-       taken by the floor designer's drag handler, and a duplicate key in this
-       object silently replaced it — dragging a table then called this and
-       failed on a null `moving`. */
-    // Takes the order id rather than finding it: no closure, nothing to go stale.
-    transferTable: async (orderId, tableId) => {
-      if (!orderId) return flash("Save the table first, then move it.");
-      const ok = await guard((c) => api.transferOrder(c, orderId, tableId), "Table moved");
-      if (ok) { setMoving(null); setOpenTableId(null); refresh(); }
-      return ok;
-    },
-    mergeTable: async (fromOrderId, intoOrderId) => {
-      if (!fromOrderId) return flash("Save the table first, then merge it.");
-      const ok = await guard((c) => api.mergeOrders(c, fromOrderId, intoOrderId), "Tables merged");
-      if (ok) { setMoving(null); setOpenTableId(null); refresh(); }
-      return ok;
-    },
-    loadRecipe: (articleId) => api.loadRecipe(client, articleId).catch(() => null),
-    saveFiscal: (cfg) => guard((c) => api.setFiscalConfig(c, venue.id, cfg), "Printer settings saved"),
-    uploadLogo: async (file) => {
-      const ok = await guard((c) => api.uploadLogo(c, venue.id, file));
-      if (ok) setLogoStamp(Date.now());
-      return ok;
-    },
-    removeLogo: () => guard(async (c) => {
-      await api.removeLogo(c, venue.id, venue.logoPath);
-      setLogoStamp(Date.now());
-    }),
-    // Every value these actions read has to be listed, or the closure keeps
-    // whatever it saw when the memo last ran. That is exactly how "nothing to
-    // move" appeared on a table with drinks on it.
-  }), [guard, client, venue, flash, loadSecurity, loadStock, refresh, refreshShift,
-       orders, moving?.tableId, shift?.id]);
 
   /* ---- orders: these are the writes that must survive a dead connection ---- */
 
@@ -4495,20 +4400,6 @@ export default function App() {
     }
   }, []);
 
-  /* Anything paid but unprinted — a jam, or the bar was offline. */
-  const retryFiscal = useCallback(async () => {
-    if (!client || !venue) return;
-    try {
-      const stuck = await api.loadFiscalProblems(client, venue.id);
-      let done = 0;
-      for (const b of stuck) {
-        // Sequential on purpose: one printer, one queue.
-        if (await printFiscal(b.id)) done++; else break;
-      }
-      flash(done ? `${done} receipt${done > 1 ? "s" : ""} printed` : "Printer still unreachable");
-      loadReports();
-    } catch (e) { flash(e.message); }
-  }, [client, venue, printFiscal, flash, loadReports]);
 
   /* ---- owner reports ---- */
   const [mode, setMode] = useState("day");
@@ -4566,6 +4457,121 @@ export default function App() {
     } catch (e) { flash(e.message); }
     finally { setReportLoading(false); setProductsLoading(false); }
   }, [client, venue, session, range.from, range.to, mode, flash]);
+
+  /* Anything paid but unprinted — a jam, or the bar was offline. */
+  const retryFiscal = useCallback(async () => {
+    if (!client || !venue) return;
+    try {
+      const stuck = await api.loadFiscalProblems(client, venue.id);
+      let done = 0;
+      for (const b of stuck) {
+        // Sequential on purpose: one printer, one queue.
+        if (await printFiscal(b.id)) done++; else break;
+      }
+      flash(done ? `${done} receipt${done > 1 ? "s" : ""} printed` : "Printer still unreachable");
+      loadReports();
+    } catch (e) { flash(e.message); }
+  }, [client, venue, printFiscal, flash, loadReports]);
+
+  /* Declared here, below every callback and piece of state it reads.
+     A dependency array is evaluated during render, so listing something
+     declared further down is a temporal dead zone error — which is exactly
+     what crashed the app on load. */
+  const barActions = useMemo(() => ({
+    saveTable: (zid, t) => guard((c) => api.upsertTable(c, venue.id, zid, t)),
+    moveTable: (id, x, y) => api.moveTable(client, id, x, y).catch((e) => flash(e.message)),
+    deleteTable: (id) => guard((c) => api.deleteTable(c, id)),
+    saveZone: (z) => guard((c) => api.upsertZone(c, venue.id, z)),
+    deleteZone: (id) => guard((c) => api.deleteZone(c, id)),
+    saveArticle: (a) => guard((c) => api.upsertArticle(c, venue.id, a), "Price list updated"),
+    removeArticle: (id) => guard((c) => api.deleteArticle(c, id), "Article removed"),
+    saveStaff: (s2) => guard((c) => api.upsertStaff(c, venue.id, s2), "Team updated"),
+    resetStaffPin: (id) => guard((c) => api.resetStaffPin(c, id)),
+    removeStaff: (id) => guard((c) => api.deactivateStaff(c, id)),
+    setDiscountPolicy: (v) => guard((c) => api.setDiscountPolicy(c, venue.id, v)),
+    changeOwnPin: async (cur, next) => {
+      const ok = await guard((c) => api.changeOwnPin(c, cur, next), "PIN changed — use the new one next time");
+      if (ok) loadSecurity();
+      return ok;
+    },
+    saveBranding: (b) => guard((c) => api.setBranding(c, venue.id, b)),
+    setLanguage: (code) => guard((c) => api.setLanguage(c, venue.id, code)),
+
+    saveIngredient: async (v) => {
+      const ok = await guard((c) => api.saveIngredient(c, venue.id, v), "Saved");
+      if (ok) loadStock();
+      return ok;
+    },
+    removeIngredient: async (id) => {
+      const ok = await guard((c) => api.removeIngredient(c, id));
+      if (ok) loadStock();
+      return ok;
+    },
+    receiveDelivery: async (rows, note) => {
+      const ok = await guard((c) => api.receiveDelivery(c, venue.id, rows, note),
+        `${rows.length} received — costs updated`);
+      if (ok) { loadStock(); refresh(); }
+      return ok;
+    },
+    recordStocktake: async (rows, note) => {
+      const res = await guard((c) => api.recordStocktake(c, venue.id, rows, note));
+      if (res) {
+        loadStock();
+        const off = (res.lines || []).length;
+        // The difference is the whole reason for counting, so say it out loud.
+        flash(off
+          ? `${off} ingredient${off > 1 ? "s" : ""} didn't match — ${money(Math.abs(Number(res.value) || 0), venue.currency)} of variance`
+          : "Everything matched the books");
+      }
+      return res;
+    },
+    saveRecipe: (articleId, items) => guard((c) => api.saveRecipe(c, articleId, items)),
+
+    startShift: () => setPrompt({ kind: "float" }),
+    openShiftWith: async (amount) => {
+      const ok = await guard((c) => api.openShift(c, venue.id, amount), "Shift started");
+      if (ok) refreshShift();
+      return ok;
+    },
+    endShift: async (declared, note) => {
+      const res = await guard((c) => api.closeShift(c, shift.id, declared, note));
+      if (res) { setShift(null); refreshShift(); }
+      return res;
+    },
+
+    /* Named for what it does, not for what it moves. `moveTable` was already
+       taken by the floor designer's drag handler, and a duplicate key in this
+       object silently replaced it — dragging a table then called this and
+       failed on a null `moving`. */
+    // Takes the order id rather than finding it: no closure, nothing to go stale.
+    transferTable: async (orderId, tableId) => {
+      if (!orderId) return flash("Save the table first, then move it.");
+      const ok = await guard((c) => api.transferOrder(c, orderId, tableId), "Table moved");
+      if (ok) { setMoving(null); setOpenTableId(null); refresh(); }
+      return ok;
+    },
+    mergeTable: async (fromOrderId, intoOrderId) => {
+      if (!fromOrderId) return flash("Save the table first, then merge it.");
+      const ok = await guard((c) => api.mergeOrders(c, fromOrderId, intoOrderId), "Tables merged");
+      if (ok) { setMoving(null); setOpenTableId(null); refresh(); }
+      return ok;
+    },
+    loadRecipe: (articleId) => api.loadRecipe(client, articleId).catch(() => null),
+    saveFiscal: (cfg) => guard((c) => api.setFiscalConfig(c, venue.id, cfg), "Printer settings saved"),
+    uploadLogo: async (file) => {
+      const ok = await guard((c) => api.uploadLogo(c, venue.id, file));
+      if (ok) setLogoStamp(Date.now());
+      return ok;
+    },
+    removeLogo: () => guard(async (c) => {
+      await api.removeLogo(c, venue.id, venue.logoPath);
+      setLogoStamp(Date.now());
+    }),
+    // Every value these actions read has to be listed, or the closure keeps
+    // whatever it saw when the memo last ran. That is exactly how "nothing to
+    // move" appeared on a table with drinks on it.
+  }), [guard, client, venue, flash, loadSecurity, loadStock, refresh, refreshShift,
+       orders, moving?.tableId, shift?.id]);
 
   useEffect(() => {
     if (tab === "reports") loadReports();
