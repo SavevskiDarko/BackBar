@@ -4,7 +4,7 @@ import {
   RectangleHorizontal, Users, Clock, CreditCard, Banknote, Search, ChevronRight,
   Copy, Save, Receipt, RotateCw, Loader2, Wine, ListOrdered, LogOut, Delete,
   ChevronLeft, Palette, ImageIcon, Printer, Martini, LayoutList, CalendarClock,
-  Package, TruckIcon, ClipboardCheck, MoveRight,
+  Package, TruckIcon, ClipboardCheck, MoveRight, ShoppingBag,
   ShieldCheck, UserPlus, AlertTriangle, ArrowLeft, KeyRound, Pause, Play, Wallet,
 } from "lucide-react";
 
@@ -972,7 +972,7 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
                 <>
                   <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
                     <Btn variant="quiet" disabled={busy} onClick={() => onCommit(lines, guests)} icon={busy ? Loader2 : Save} style={{ flex: 1, background: "#221E15", color: C.cream, borderColor: "#221E15" }}>{t("Save order")}</Btn>
-                    <Btn variant="solid" disabled={!lines.length || busy || !order} onClick={() => setPaying(true)} icon={Receipt} style={{ flex: 1 }}>{t("Close bill")}</Btn>
+                    <Btn variant="solid" disabled={!lines.length || busy} onClick={() => setPaying(true)} icon={Receipt} style={{ flex: 1 }}>{t("Close bill")}</Btn>
                   </div>
                   {/* Only offered on a saved order: the split happens
                       server-side against lines that exist there. */}
@@ -1008,10 +1008,10 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
                     <>
                       <div style={{ display: "flex", gap: 8 }}>
                         <Btn variant="quiet" disabled={busy} icon={Banknote}
-                          onClick={() => onSettle("cash", true, discount, null, customer)}
+                          onClick={() => onSettle("cash", true, discount, null, customer, { lines, guests })}
                           style={{ flex: 1, background: "#221E15", color: C.cream, borderColor: "#221E15" }}>{t("Cash")}</Btn>
                         <Btn variant="solid" disabled={busy} icon={CreditCard}
-                          onClick={() => onSettle("card", true, discount, null, customer)}
+                          onClick={() => onSettle("card", true, discount, null, customer, { lines, guests })}
                           style={{ flex: 1 }}>{t("Card")}</Btn>
                       </div>
                       <Btn variant="bare" onClick={() => setSplit({ cash: round2(total / 2), card: round2(total - round2(total / 2)) })}
@@ -1026,7 +1026,7 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
                       onCancel={() => setSplit(null)}
                       onConfirm={() => onSettle(null, true, discount,
                         [{ method: "cash", amount: split.cash }, { method: "card", amount: split.card }],
-                        customer)}
+                        customer, { lines, guests })}
                     />
                   )}
 
@@ -1055,7 +1055,7 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
                           background: C.cream, color: "#221E15", fontFamily: SANS, fontSize: 13, outline: "none" }} />
                     </div>
                   )}
-                  <Btn variant="ghost" disabled={busy} icon={AlertTriangle} onClick={() => onSettle(null, false, discount, null, null)}
+                  <Btn variant="ghost" disabled={busy} icon={AlertTriangle} onClick={() => onSettle(null, false, discount, null, null, { lines, guests })}
                     style={{ width: "100%", marginTop: 8, color: "#8A5A2E", borderColor: "rgba(0,0,0,0.2)" }}>
                     {t("Not paid — leave on the tab")}
                   </Btn>
@@ -4121,7 +4121,14 @@ export default function App() {
   }, [venue?.brandAccent, venue?.brandSurface, venue]);
 
   const zone = zones.find((z) => z.id === zoneId) || zones[0] || null;
-  const table = zone?.tables.find((t) => t.id === openTableId) || null;
+  /* Takeaway: someone at the counter with no table. save_order_full already
+     accepts a null table and a free label, so this needs no schema change —
+     just somewhere for it to live, which is Open bills. */
+  const [takeaway, setTakeaway] = useState(null);   // { id, label } while open
+
+  const table = takeaway
+    || zone?.tables.find((t) => t.id === openTableId)
+    || null;
 
   // Orders are keyed by id; the floor needs them keyed by table.
   const ordersByTable = useMemo(() => {
@@ -4129,7 +4136,9 @@ export default function App() {
     Object.values(orders).forEach((o) => { m[`${o.venueId}/${o.tableId}`] = o; });
     return m;
   }, [orders]);
-  const openOrder = table ? ordersByTable[`${venue?.id}/${table.id}`] : null;
+  const openOrder = takeaway
+    ? Object.values(orders).find((o) => o.id === takeaway.orderId) || null
+    : table ? ordersByTable[`${venue?.id}/${table.id}`] : null;
 
   /* ---- auth handlers ---- */
   const doPair = async (code) => {
@@ -4196,9 +4205,12 @@ export default function App() {
 
   const commitOrder = async (lines, guests, close = true) => {
     setSheetBusy(true);
-    const orderId = openOrder?.id || crypto.randomUUID();
+    const orderId = openOrder?.id || takeaway?.orderId || crypto.randomUUID();
+    /* Returned on success so "Close bill" can create and settle in one go.
+       Making a waiter press Save before Close is bookkeeping the app should do
+       for itself — and for a takeaway there is nothing to come back to. */
     const payload = {
-      orderId, barId: venue.id, tableId: table.id, tableLabel: table.label,
+      orderId, barId: venue.id, tableId: table.id || null, tableLabel: table.label,
       guests, lines, staffId: openOrder?.staffId || session.actorId,
       staffName: openOrder?.staffName || session.actorName,
       openedAt: openOrder?.openedAt || Date.now(),
@@ -4213,9 +4225,9 @@ export default function App() {
       );
       if (close) setOpenTableId(null);
       flash(res === "queued"
-        ? `Table ${table.label} saved on this device — will sync`
-        : `Table ${table.label} saved`);
-      return true;
+        ? `${table.label} saved on this device — will sync`
+        : `${table.label} saved`);
+      return orderId;
     } catch (e) { flash(e.message); return false; }
     finally { setSheetBusy(false); }
   };
@@ -4260,7 +4272,7 @@ export default function App() {
       });
 
       if (takenAll) {
-        setOpenTableId(null);
+        setOpenTableId(null); setTakeaway(null);
         flash(`Paid ${money(bill.total, venue.currency)} — table closed`);
       } else {
         // The sheet stays open, so tell it to re-read the remaining lines.
@@ -4272,18 +4284,25 @@ export default function App() {
     finally { setSheetBusy(false); }
   };
 
-  const settleOrder = async (method, paid, discount, payments, customer) => {
-    if (!openOrder) return flash("Save the order before closing it.");
+  const settleOrder = async (method, paid, discount, payments, customer, draft) => {
+    /* No saved order yet — create it, then settle it, in one tap. The sheet
+       passes its current lines rather than the app reaching into its state. */
+    let orderId = openOrder?.id;
+    if (!orderId) {
+      if (!draft?.lines?.length) return flash("Add something first.");
+      orderId = await commitOrder(draft.lines, draft.guests, false);
+      if (!orderId) return;
+    }
     setSheetBusy(true);
     const billId = crypto.randomUUID();
     const total = round2(openOrder.lines.reduce((a, l) => a + l.price * l.qty, 0) * (1 - (discount || 0) / 100));
     try {
       const res = await write(
         "order.close",
-        { orderId: openOrder.id, billId, method, paid, discount, payments, customer },
-        (c) => api.closeBill(c, { orderId: openOrder.id, billId, method, paid, discount, payments, customer })
+        { orderId, billId, method, paid, discount, payments, customer },
+        (c) => api.closeBill(c, { orderId, billId, method, paid, discount, payments, customer })
       );
-      setOpenTableId(null);
+      setOpenTableId(null); setTakeaway(null);
       const tail = res === "queued" ? " (will sync)" : "";
       flash(paid
         ? `Table ${table.label} paid — ${money(total, venue.currency)}${tail}`
@@ -4876,6 +4895,11 @@ export default function App() {
               onStart={barActions.startShift} onEnd={() => setCashingUp(true)} />
 
             <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+              <Btn size="sm" icon={ShoppingBag} variant="ghost"
+                onClick={() => setTakeaway({ id: null, label: t("Takeaway"),
+                                             orderId: crypto.randomUUID() })}>
+                {t("Takeaway")}
+              </Btn>
               {zones.map((z) => {
                 const n = z.tables.filter((t) => ordersByTable[`${venue.id}/${t.id}`]).length;
                 return (
@@ -4917,7 +4941,12 @@ export default function App() {
                     const mine = o.staffId === session.actorId;
                     const z = zones.find((zz) => zz.tables.some((t) => t.id === o.tableId));
                     return (
-                      <button key={o.id} onClick={() => { if (z) setZoneId(z.id); setOpenOn("bill"); setOpenTableId(o.tableId); }} style={{
+                      <button key={o.id} onClick={() => {
+                        setOpenOn("bill");
+                        if (o.tableId) { if (z) setZoneId(z.id); setOpenTableId(o.tableId); }
+                        // A takeaway has no table to open, so reopen it by id.
+                        else setTakeaway({ id: null, label: o.tableLabel, orderId: o.id });
+                      }} style={{
                         textAlign: "left", background: C.panel,
                         border: `1px solid ${stale ? "rgba(212,103,74,0.4)" : mine && isWaiter ? C.brassDim : C.line}`,
                         borderRadius: 12, padding: 13, cursor: "pointer",
@@ -4987,7 +5016,7 @@ export default function App() {
           canSeeCost={isOwner}
           canDiscount={isOwner || venue.allowStaffDiscount}
           busy={sheetBusy}
-          onClose={() => setOpenTableId(null)}
+          onClose={() => { setOpenTableId(null); setTakeaway(null); }}
           onCommit={commitOrder}
           onSettle={settleOrder}
           onPayPart={payPart}

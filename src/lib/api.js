@@ -76,7 +76,7 @@ export async function saveOrder(client, { orderId, barId, table, guests, lines, 
     await client.rpc("save_order_full", {
       p_order: id,
       p_bar: barId,
-      p_table: table.id,
+      p_table: table.id || null,   // null for a takeaway
       p_label: table.label,
       p_guests: guests,
       p_staff: staff.id,
