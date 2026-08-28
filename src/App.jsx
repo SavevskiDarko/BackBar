@@ -725,18 +725,39 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
         border: narrow ? "none" : `1px solid ${C.line}`,
         borderRadius: narrow ? 0 : 18, overflow: "hidden",
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderBottom: `1px solid ${C.line}`, flexShrink: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: narrow ? 8 : 14,
+          padding: narrow ? "12px 12px" : "14px 16px", borderBottom: `1px solid ${C.line}`, flexShrink: 0 }}>
           <div style={{ width: 44, height: 44, borderRadius: 11, border: `1.5px solid ${C.brass}`, display: "grid", placeItems: "center", fontFamily: MONO, fontWeight: 700, color: C.brass, fontSize: 16, flexShrink: 0 }}>
             {table.label}
           </div>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 15 }}>Table {table.label}</div>
-            <div style={{ fontFamily: SANS, fontSize: 12, color: C.sageDim }}>
-              {zone.name} · {order ? `open ${since(order.openedAt, now)} · ${order.staffName}` : `new bill · ${actorName}`}
+          {/* Both lines clip rather than wrap. With five controls to its right
+              this column gets narrow, and a wrapping title pushed the header to
+              five lines on a phone. */}
+          {/* The badge already says which table it is, so on a phone the words
+              "Table 2" only steal room from the context that isn't shown
+              anywhere else. Both lines clip rather than wrap — five controls sit
+              to the right and a wrapping title made the header five rows tall. */}
+          <div style={{ minWidth: 0, flex: 1, overflow: "hidden" }}>
+            {!narrow && (
+              <div style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 15,
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {t("Table")} {table.label}
+              </div>
+            )}
+            <div style={{ fontFamily: SANS, fontSize: narrow ? 13 : 12,
+              fontWeight: narrow ? 600 : 400, color: narrow ? C.cream : C.sageDim,
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {zone.name}
+            </div>
+            <div style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim,
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {order ? `${since(order.openedAt, now)} · ${order.staffName}` : `${t("new bill")} · ${actorName}`}
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Users size={14} color={C.sageDim} />
+          {/* The icon is decoration next to a number that is obviously a headcount,
+              and on a phone it costs the room label its last twenty pixels. */}
+          <div style={{ display: "flex", alignItems: "center", gap: narrow ? 2 : 6, flexShrink: 0 }}>
+            {!narrow && <Users size={14} color={C.sageDim} />}
             <Btn size="sm" variant="bare" onClick={() => setGuests(Math.max(1, guests - 1))} icon={Minus} />
             <span style={{ fontFamily: MONO, color: C.cream, width: 18, textAlign: "center" }}>{guests}</span>
             <Btn size="sm" variant="bare" onClick={() => setGuests(guests + 1)} icon={Plus} />
@@ -2895,9 +2916,14 @@ function Branding({ venue, flash, actions, onLanguage }) {
 function MoveTable({ from, zones, orders, cur, onCancel, onMove, onMerge, busy }) {
   const [confirm, setConfirm] = useState(null);   // an occupied target
 
+  /* Resolved here, from live props, and passed to the action as an argument.
+     The action used to look this up itself through a closure over component
+     state — which is how it kept reporting an empty table that plainly had
+     drinks on it. A function given its inputs cannot be stale. */
+  const own = Object.values(orders).find((x) => x.tableId === from.tableId);
+
   if (confirm) {
     const total = (confirm.order.lines || []).reduce((a, l) => a + l.price * l.qty, 0);
-    const own = Object.values(orders).find((x) => x.tableId === from.tableId);
     const mine = (own?.lines || []).reduce((a, l) => a + l.price * l.qty, 0);
     return (
       <Modal onClose={() => setConfirm(null)} width={340}>
@@ -2918,7 +2944,7 @@ function MoveTable({ from, zones, orders, cur, onCancel, onMove, onMerge, busy }
         <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
           <Btn variant="ghost" style={{ flex: 1 }} onClick={() => setConfirm(null)}>Back</Btn>
           <Btn variant="solid" icon={busy ? Loader2 : Check} style={{ flex: 1 }} disabled={busy}
-            onClick={() => onMerge(confirm.order.id)}>Merge them</Btn>
+            onClick={() => onMerge(own.id, confirm.order.id)}>Merge them</Btn>
         </div>
       </Modal>
     );
@@ -2942,7 +2968,7 @@ function MoveTable({ from, zones, orders, cur, onCancel, onMove, onMerge, busy }
                 const o = Object.values(orders).find((x) => x.tableId === t.id);
                 return (
                   <button key={t.id} disabled={busy}
-                    onClick={() => (o ? setConfirm({ ...t, order: o }) : onMove(t.id))}
+                    onClick={() => (o ? setConfirm({ ...t, order: o }) : onMove(own.id, t.id))}
                     style={{
                       padding: "10px 8px", borderRadius: 10, cursor: "pointer",
                       border: `1px solid ${o ? C.brassDim : C.line}`,
@@ -4231,21 +4257,16 @@ export default function App() {
        taken by the floor designer's drag handler, and a duplicate key in this
        object silently replaced it — dragging a table then called this and
        failed on a null `moving`. */
-    transferTable: async (tableId) => {
-      /* Resolved now, not when the button was tapped. The Move button saves an
-         unsaved table first, and a callback created before that save captured
-         a null order — which is how "nothing to move" appeared on a table that
-         plainly had drinks on it. */
-      const o = Object.values(orders).find((x) => x.tableId === moving?.tableId);
-      if (!o?.id) return flash("Nothing to move — open the table first.");
-      const ok = await guard((c) => api.transferOrder(c, o.id, tableId), "Table moved");
+    // Takes the order id rather than finding it: no closure, nothing to go stale.
+    transferTable: async (orderId, tableId) => {
+      if (!orderId) return flash("Save the table first, then move it.");
+      const ok = await guard((c) => api.transferOrder(c, orderId, tableId), "Table moved");
       if (ok) { setMoving(null); setOpenTableId(null); refresh(); }
       return ok;
     },
-    mergeTable: async (intoOrderId) => {
-      const o = Object.values(orders).find((x) => x.tableId === moving?.tableId);
-      if (!o?.id) return flash("Nothing to merge — open the table first.");
-      const ok = await guard((c) => api.mergeOrders(c, o.id, intoOrderId), "Tables merged");
+    mergeTable: async (fromOrderId, intoOrderId) => {
+      if (!fromOrderId) return flash("Save the table first, then merge it.");
+      const ok = await guard((c) => api.mergeOrders(c, fromOrderId, intoOrderId), "Tables merged");
       if (ok) { setMoving(null); setOpenTableId(null); refresh(); }
       return ok;
     },
