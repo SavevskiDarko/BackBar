@@ -4398,6 +4398,7 @@ export default function App() {
 
   const commitOrder = async (lines, guests, close = true) => {
     setSheetBusy(true);
+    try {
     const orderId = openOrder?.id || takeaway?.orderId || crypto.randomUUID();
     /* Returned on success so "Close bill" can create and settle in one go.
        Making a waiter press Save before Close is bookkeeping the app should do
@@ -4408,7 +4409,7 @@ export default function App() {
       staffName: openOrder?.staffName || session.actorName,
       openedAt: openOrder?.openedAt || Date.now(),
     };
-    try {
+
       const res = await write("order.save", payload, (c) =>
         api.saveOrder(c, {
           orderId, barId: venue.id, table, guests, lines,
@@ -4450,8 +4451,8 @@ export default function App() {
   const payPart = async (chosen, method) => {
     if (!openOrder) return flash("Save the order first.");
     setSheetBusy(true);
-    const billId = crypto.randomUUID();
     try {
+      const billId = crypto.randomUUID();
       const bill = await api.payPartOfOrder(client, {
         orderId: openOrder.id, billId, lines: chosen, method, paid: true,
       });
@@ -4486,28 +4487,43 @@ export default function App() {
       orderId = await commitOrder(draft.lines, draft.guests, false);
       if (!orderId) return;
     }
+
     setSheetBusy(true);
-    const billId = crypto.randomUUID();
-    const total = round2(openOrder.lines.reduce((a, l) => a + l.price * l.qty, 0) * (1 - (discount || 0) / 100));
     try {
+      const billId = crypto.randomUUID();
+
+      /* Whichever source exists: a saved order, or the draft we just created
+         one from. Reading openOrder here was the bug — on the one-tap path it
+         is null by definition, so this threw before the try block and left the
+         sheet stuck busy with nothing settled and no error shown. */
+      const settled = openOrder?.lines || draft?.lines || [];
+      const total = round2(
+        settled.reduce((a, l) => a + l.price * l.qty, 0) * (1 - (discount || 0) / 100)
+      );
+
       const res = await write(
         "order.close",
         { orderId, billId, method, paid, discount, payments, customer },
         (c) => api.closeBill(c, { orderId, billId, method, paid, discount, payments, customer })
       );
-      setOpenTableId(null); setTakeaway(null);
+
+      setOpenTableId(null);
+      setTakeaway(null);
+
       const tail = res === "queued" ? " (will sync)" : "";
       flash(paid
-        ? `Table ${table.label} paid — ${money(total, venue.currency)}${tail}`
-        : `Table ${table.label} closed unpaid${tail}`);
+        ? `${table.label} — ${money(total, venue.currency)}${tail}`
+        : `${table.label} closed unpaid${tail}`);
 
-      // A cash sale needs its fiscal receipt now, not later. Fire it once the
-      // bill exists server-side; a queued bill gets its receipt when it syncs.
+      // A cash sale needs its fiscal receipt now, not later.
       if (paid && res !== "queued" && venue.fiscalEnabled && venue.fiscalBridgeUrl) {
         printFiscal(billId);
       }
-    } catch (e) { flash(e.message); }
-    finally { setSheetBusy(false); }
+    } catch (e) {
+      flash(e.message);
+    } finally {
+      setSheetBusy(false);
+    }
   };
 
   /* ---- the fiscal printer ---- */
