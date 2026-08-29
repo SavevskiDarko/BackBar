@@ -19,5 +19,10 @@ body {
 }
 input, textarea { -webkit-user-select: text; user-select: text; }
 
-/* Respect the notch when installed to the home screen. */
-#root { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+/* Respect the notch when installed to the home screen.
+
+   The top inset is deliberately NOT here. The app header is sticky, so it
+   would slide up under the status bar on scroll regardless of any padding on
+   #root. The header carries its own top inset instead, which also lets its
+   background fill the notch area rather than leaving a transparent strip. */
+#root { padding-bottom: env(safe-area-inset-bottom); }

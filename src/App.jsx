@@ -245,7 +245,13 @@ function Modal({ children, onClose, width = 400 }) {
   return (
     <div
       onClick={(e) => e.target === e.currentTarget && onClose()}
-      style={{ position: "fixed", inset: 0, zIndex: 130, background: "rgba(4,10,8,0.74)", backdropFilter: "blur(6px)", display: "grid", placeItems: "center", padding: 16, overflowY: "auto" }}
+      style={{ position: "fixed", inset: 0, zIndex: 130, background: "rgba(4,10,8,0.74)",
+        backdropFilter: "blur(6px)", display: "grid", placeItems: "center", overflowY: "auto",
+        /* A fixed element positions against the viewport, so it escapes the
+           safe-area padding on #root. With viewport-fit=cover that viewport
+           runs under the notch and the home indicator. */
+        padding: "calc(16px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))" +
+                 " calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left))" }}
     >
       <div style={{ width: "100%", maxWidth: width, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 16, padding: 20 }}>
         {children}
@@ -702,7 +708,8 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
     <div
       onClick={(e) => e.target === e.currentTarget && onClose()}
       style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(4,10,8,0.72)",
-        backdropFilter: "blur(6px)", display: "flex", padding: narrow ? 0 : 24 }}
+        backdropFilter: "blur(6px)", display: "flex",
+        padding: narrow ? 0 : "calc(24px + env(safe-area-inset-top)) 24px calc(24px + env(safe-area-inset-bottom))" }}
     >
       {voiding && (
         <VoidReason
@@ -725,8 +732,13 @@ function OrderSheet({ table, zone, venue, order, articles, onClose, onCommit, on
         border: narrow ? "none" : `1px solid ${C.line}`,
         borderRadius: narrow ? 0 : 18, overflow: "hidden",
       }}>
+        {/* The sheet is flush to the top on a phone, so this header sits under
+            the status bar unless it carries the inset itself. */}
         <div style={{ display: "flex", alignItems: "center", gap: narrow ? 8 : 14,
-          padding: narrow ? "12px 12px" : "14px 16px", borderBottom: `1px solid ${C.line}`, flexShrink: 0 }}>
+          padding: narrow
+            ? "calc(12px + env(safe-area-inset-top)) 12px 12px"
+            : "14px 16px",
+          borderBottom: `1px solid ${C.line}`, flexShrink: 0 }}>
           <div style={{ width: 44, height: 44, borderRadius: 11, border: `1.5px solid ${C.brass}`, display: "grid", placeItems: "center", fontFamily: MONO, fontWeight: 700, color: C.brass, fontSize: 16, flexShrink: 0 }}>
             {table.label}
           </div>
@@ -3972,7 +3984,7 @@ function UpdateChip() {
   if (!ready) return null;
   return (
     <button onClick={() => location.reload()} style={{
-      position: "fixed", bottom: 22, left: "50%", transform: "translateX(-50%)", zIndex: 210,
+      position: "fixed", bottom: "calc(22px + env(safe-area-inset-bottom))", left: "50%", transform: "translateX(-50%)", zIndex: 210,
       display: "flex", alignItems: "center", gap: 9, padding: "11px 18px", borderRadius: 99,
       background: C.brass, color: C.onBrass, border: "none", cursor: "pointer",
       fontFamily: SANS, fontSize: 13, fontWeight: 700,
@@ -4794,7 +4806,13 @@ export default function App() {
         </div>
       )}
 
-      <header style={{ position: "sticky", top: 0, zIndex: 60, background: "rgba(10,20,17,0.92)", backdropFilter: "blur(10px)", borderBottom: `1px solid ${C.line}` }}>
+      {/* Sticky at top:0 means the viewport top, which on a notched phone is
+          behind the status bar. The header carries the inset so its own
+          background fills that strip. */}
+      <header style={{ position: "sticky", top: 0, zIndex: 60,
+        paddingTop: "env(safe-area-inset-top)",
+        background: "rgba(10,20,17,0.92)", backdropFilter: "blur(10px)",
+        borderBottom: `1px solid ${C.line}` }}>
         <div style={{ maxWidth: 1320, margin: "0 auto", padding: "11px 18px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginRight: "auto" }}>
             <Mark logoUrl={venue?.logoUrl} />
@@ -5084,7 +5102,7 @@ export default function App() {
 
       {toast && (
         <div style={{
-          position: "fixed", bottom: 22, left: "50%", transform: "translateX(-50%)", zIndex: 200,
+          position: "fixed", bottom: "calc(22px + env(safe-area-inset-bottom))", left: "50%", transform: "translateX(-50%)", zIndex: 200,
           background: C.raise, border: `1px solid ${C.brassDim}`, color: C.cream, padding: "11px 18px",
           borderRadius: 11, fontFamily: SANS, fontSize: 13, fontWeight: 600, maxWidth: "90vw", textAlign: "center",
           boxShadow: "0 10px 40px -10px rgba(0,0,0,0.8)",
