@@ -496,7 +496,7 @@ function SeatPips({ table, scale }) {
   ));
 }
 
-function TableNode({ table, scale, order, selected, onPointerDown, onClick, mode, currency, now, showMoney }) {
+function TableNode({ table, scale, order, selected, onPointerDown, onClick, mode, currency, now, showMoney, nodeRef }) {
   const occupied = !!order;
   const total = occupied ? order.lines.reduce((s, l) => s + l.price * l.qty, 0) : 0;
   const stale = occupied && (now - order.openedAt) / 60000 > 75;
@@ -510,9 +510,13 @@ function TableNode({ table, scale, order, selected, onPointerDown, onClick, mode
 
   return (
     <div
+      ref={nodeRef}
       onPointerDown={onPointerDown} onClick={onClick}
       style={{
         position: "absolute", left: `${(table.x / PLAN_W) * 100}%`, top: `${(table.y / PLAN_H) * 100}%`,
+        // Dragging writes straight to this element's style; keeping it on its
+        // own layer stops the browser repainting the whole floor each frame.
+        willChange: mode === "design" ? "left, top" : "auto",
         width: `${(table.w / PLAN_W) * 100}%`, height: `${(table.h / PLAN_H) * 100}%`,
         transform: `translate(-50%,-50%) rotate(${table.rot || 0}deg)`,
         cursor: mode === "design" ? "grab" : isBar ? "default" : "pointer",
@@ -554,7 +558,7 @@ function TableNode({ table, scale, order, selected, onPointerDown, onClick, mode
   );
 }
 
-function FloorPlan({ zone, orders, venueId, mode, selectedId, onSelect, onMove, onMoveEnd, currency, now }) {
+function FloorPlan({ zone, orders, venueId, mode, selectedId, onSelect, onMove, currency, now }) {
   const ref = useRef(null);
   const w = useWidth(ref);
   const scale = w ? w / PLAN_W : 0;
@@ -565,33 +569,66 @@ function FloorPlan({ zone, orders, venueId, mode, selectedId, onSelect, onMove, 
     return { x: ((cx - r.left) / r.width) * PLAN_W, y: ((cy - r.top) / r.height) * PLAN_H };
   }, []);
 
+  /* Dragging used to call setState on every pointermove, so the whole floor —
+     every table, its glow, its label — re-rendered sixty times a second. On a
+     phone that lags; on a tablet the events queue up and the table appears not
+     to move at all.
+
+     Now the drag writes position straight onto the element's style and React
+     is told once, on release. The plan's rectangle is measured on pointerdown
+     rather than every frame, because getBoundingClientRect forces a reflow. */
+  const nodes = useRef({});
+  const planRect = useRef(null);
+
+  const fromRect = (r, cx, cy) => ({
+    x: ((cx - r.left) / r.width) * PLAN_W,
+    y: ((cy - r.top) / r.height) * PLAN_H,
+  });
+
   const down = (e, t) => {
     if (mode !== "design") return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    const p = toPlan(e.clientX, e.clientY);
-    drag.current = { id: t.id, dx: p.x - t.x, dy: p.y - t.y };
+    planRect.current = ref.current.getBoundingClientRect();
+    const p = fromRect(planRect.current, e.clientX, e.clientY);
+    drag.current = { id: t.id, dx: p.x - t.x, dy: p.y - t.y, x: t.x, y: t.y, w: t.w, h: t.h, moved: false };
     onSelect(t.id);
   };
+
   const move = (e) => {
-    if (!drag.current) return;
-    const p = toPlan(e.clientX, e.clientY);
-    const t = zone.tables.find((x) => x.id === drag.current.id);
-    if (!t) return;
-    onMove(t.id,
-      clamp(Math.round((p.x - drag.current.dx) / 5) * 5, t.w / 2, PLAN_W - t.w / 2),
-      clamp(Math.round((p.y - drag.current.dy) / 5) * 5, t.h / 2, PLAN_H - t.h / 2));
+    const d = drag.current;
+    if (!d || !planRect.current) return;
+    const p = fromRect(planRect.current, e.clientX, e.clientY);
+    const x = clamp(Math.round((p.x - d.dx) / 5) * 5, d.w / 2, PLAN_W - d.w / 2);
+    const y = clamp(Math.round((p.y - d.dy) / 5) * 5, d.h / 2, PLAN_H - d.h / 2);
+    if (x === d.x && y === d.y) return;      // nothing changed; don't touch the DOM
+    d.x = x; d.y = y; d.moved = true;
+
+    const node = nodes.current[d.id];
+    if (node) {
+      node.style.left = `${(x / PLAN_W) * 100}%`;
+      node.style.top = `${(y / PLAN_H) * 100}%`;
+    }
+  };
+
+  const up = () => {
+    const d = drag.current;
+    drag.current = null;
+    planRect.current = null;
+    if (!d) return;
+    // One state update, at the end, with the final position.
+    if (d.moved) onMove(d.id, d.x, d.y);
   };
 
   return (
     <div
       ref={ref} onPointerMove={move}
-      onPointerUp={() => { if (drag.current && onMoveEnd) onMoveEnd(drag.current.id); drag.current = null; }}
-      onPointerCancel={() => { if (drag.current && onMoveEnd) onMoveEnd(drag.current.id); drag.current = null; }}
+      onPointerUp={up} onPointerCancel={up}
       onClick={(e) => e.target === e.currentTarget && mode === "design" && onSelect(null)}
       style={{
         position: "relative", width: "100%", aspectRatio: `${PLAN_W} / ${PLAN_H}`,
         background: `radial-gradient(120% 90% at 50% 0%, ${C.a05}, rgba(0,0,0,0) 55%), linear-gradient(180deg, #0C1815, #08110E)`,
         borderRadius: 16, border: `1px solid ${C.line}`, overflow: "hidden", userSelect: "none",
+        touchAction: mode === "design" ? "none" : "auto",
       }}
     >
       <div style={{
@@ -604,6 +641,7 @@ function FloorPlan({ zone, orders, venueId, mode, selectedId, onSelect, onMove, 
         <TableNode
           key={t.id} table={t} scale={scale} currency={currency} now={now} showMoney
           order={orders[`${venueId}/${t.id}`]} selected={selectedId === t.id} mode={mode}
+          nodeRef={(el) => { nodes.current[t.id] = el; }}
           onPointerDown={(e) => down(e, t)}
           onClick={() => {
             if (mode === "design") onSelect(t.id);
@@ -1293,23 +1331,17 @@ function SplitTender({ total, cur, split, setSplit, onCancel, onConfirm, busy })
 
 function Designer({ venue, zones, zoneId, setZoneId, orders, now, flash, actions }) {
   const [sel, setSel] = useState(null);
-  const [drafts, setDrafts] = useState({}); // positions mid-drag, not yet saved
   const plan = PLANS[venue.subscription.plan];
   const baseZone = zones.find((z) => z.id === zoneId) || zones[0];
-  const zone = {
-    ...baseZone,
-    tables: baseZone.tables.map((t) => (drafts[t.id] ? { ...t, ...drafts[t.id] } : t)),
-  };
+  const zone = baseZone;
   const table = zone.tables.find((t) => t.id === sel);
   const tableCount = zones.reduce((s, z) => s + z.tables.length, 0);
 
-  // Dragging fires on every pointer move. Keep it local; write once on release.
-  const move = (id, x, y) => setDrafts((d) => ({ ...d, [id]: { x, y } }));
-  const commitMove = (id) => {
-    const d = drafts[id];
-    if (!d) return;
-    actions.moveTable(id, d.x, d.y);
-    setDrafts(({ [id]: _drop, ...rest }) => rest);
+  /* The plan moves the element itself during a drag and reports the final
+     position once. There is no in-between state to hold any more, so the
+     mid-drag draft map is gone — along with a full re-render per frame. */
+  const move = (id, x, y) => {
+    actions.moveTable(id, x, y);
   };
   const patch = (id, p) => {
     const t = baseZone.tables.find((x) => x.id === id);
@@ -1355,7 +1387,7 @@ function Designer({ venue, zones, zoneId, setZoneId, orders, now, flash, actions
         </div>
 
         <FloorPlan zone={zone} orders={orders} venueId={venue.id} mode="design" selectedId={sel}
-          onSelect={setSel} onMove={move} onMoveEnd={commitMove} currency={venue.currency} now={now} />
+          onSelect={setSel} onMove={move} currency={venue.currency} now={now} />
 
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
           <Btn icon={Circle} onClick={() => addTable("round")}>Round table</Btn>
@@ -3186,10 +3218,37 @@ const UNIT_LABEL = { ml: "ml", g: "g", piece: "each" };
 /* A bar buys in packs and pours in millilitres. Showing both — "4.2 bottles"
    next to "2,940 ml" — is the difference between a number an owner can act on
    and one they have to do arithmetic on. */
+/* How much is actually there, in the unit the bar counts in.
+
+   Showing only packs was misleading: 1,370ml of gin displayed as "2.0 × 700ml",
+   which reads as two full bottles when it is one and a bit. Packs are rounded
+   DOWN for the same reason — a bar has the bottles it has, not the ones
+   arithmetic rounds it up to. */
+/* A quantity in the unit a bar would say out loud: millilitres up to a litre,
+   litres above it, and never rounded up — 24.5L is not 25L when you are
+   deciding whether to open another keg. */
+function amountIn(n, unit) {
+  const v = Math.max(0, Number(n) || 0);
+  if (unit === "piece") return `${Math.round(v)}`;
+  const big = unit === "ml" ? "L" : "kg";
+  if (v >= 1000) {
+    const x = Math.floor((v / 1000) * 10) / 10;
+    return `${x} ${big}`;
+  }
+  return `${Math.round(v)} ${unit}`;
+}
+
+const stockAmount = (item) => amountIn(item.in_stock, item.unit);
+
 function packsLabel(item) {
-  if (item.unit === "piece") return `${Math.round(item.in_stock)} left`;
-  const packs = Number(item.packs) || 0;
-  return `${packs.toFixed(1)} × ${Number(item.pack_size)}${UNIT_LABEL[item.unit]}`;
+  const n = Number(item.in_stock) || 0;
+  const size = Number(item.pack_size) || 0;
+  if (!size) return "";
+  // Rounded down: a bar has the bottles it has, not the ones arithmetic
+  // rounds it up to.
+  const packs = Math.floor((n / size) * 10) / 10;
+  if (item.unit === "piece") return size > 1 ? `${packs} × ${size}` : "";
+  return `${packs} × ${amountIn(size, item.unit)}`;
 }
 
 /* What a drink is made of. Lives in the article editor because that is where
@@ -3602,12 +3661,17 @@ function Stock({ venue, stock, loading, actions, onReorder }) {
                 {i.used_in > 0 ? ` · in ${i.used_in} drink${i.used_in > 1 ? "s" : ""}` : " · not used yet"}
               </div>
             </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontFamily: MONO, fontSize: 14, color: i.low ? C.copper : C.cream }}>
-                {packsLabel(i)}
+            <div style={{ textAlign: "right", flexShrink: 0 }}>
+              {/* The amount first, because that is the question being asked:
+                  how much is left. Packs and value are the follow-up. */}
+              <div style={{ fontFamily: MONO, fontSize: 15, color: i.low ? C.copper : C.cream }}>
+                {stockAmount(i)}
+                {i.unit === "piece" && (
+                  <span style={{ fontSize: 11.5, color: C.sageDim }}> left</span>
+                )}
               </div>
               <div style={{ fontFamily: MONO, fontSize: 11.5, color: C.sageDim, marginTop: 2 }}>
-                {money(Number(i.value), cur)}
+                {[packsLabel(i), money(Number(i.value), cur)].filter(Boolean).join(" · ")}
               </div>
             </div>
             {i.low && (
