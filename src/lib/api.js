@@ -175,6 +175,11 @@ export async function loadStock(client, barId) {
   return unwrap(await client.rpc("bar_stock", { p_bar: barId }));
 }
 
+/** What to buy: everything at or below par, grouped by supplier. */
+export async function loadReorder(client, barId) {
+  return unwrap(await client.rpc("bar_reorder", { p_bar: barId }));
+}
+
 export async function saveIngredient(client, barId, ing) {
   const row = {
     bar_id: barId,

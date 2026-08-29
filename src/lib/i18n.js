@@ -50,6 +50,8 @@ const MK = {
   // --- taking an order ------------------------------------------------------
   "Table": "Маса",
   "Takeaway": "За носење",
+  "Order": "Нарачка",
+  "Order copied": "Нарачката е копирана",
   "Find a drink": "Најди пијалак",
   "All": "Сите",
   "Nothing matches. Try another category.": "Нема резултати. Пробај друга категорија.",

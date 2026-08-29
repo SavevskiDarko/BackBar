@@ -4,7 +4,7 @@ import {
   RectangleHorizontal, Users, Clock, CreditCard, Banknote, Search, ChevronRight,
   Copy, Save, Receipt, RotateCw, Loader2, Wine, ListOrdered, LogOut, Delete,
   ChevronLeft, Palette, ImageIcon, Printer, Martini, LayoutList, CalendarClock,
-  Package, TruckIcon, ClipboardCheck, MoveRight, ShoppingBag,
+  Package, TruckIcon, ClipboardCheck, MoveRight, ShoppingBag, Share2,
   ShieldCheck, UserPlus, AlertTriangle, ArrowLeft, KeyRound, Pause, Play, Wallet,
 } from "lucide-react";
 
@@ -3295,6 +3295,117 @@ function RecipeEditor({ article, ingredients, recipe, cur, onChange, busy }) {
   );
 }
 
+/* The order, in the form it actually gets used: grouped by supplier, whole
+   packs, and sendable. A list you have to retype into WhatsApp is a list that
+   gets retyped wrong. */
+function ReorderSheet({ data, cur, barName, onCancel, flash }) {
+  const [qty, setQty] = useState({});          // id -> overridden pack count
+  const suppliers = data?.suppliers || [];
+
+  const packsFor = (it) => {
+    const v = qty[it.id];
+    return v === undefined || v === "" ? it.packs : Math.max(0, Number(v) || 0);
+  };
+
+  const total = suppliers.reduce((a, s) =>
+    a + s.items.reduce((b, it) => b + packsFor(it) * Number(it.packCost || 0), 0), 0);
+
+  const asText = () => {
+    const when = new Date().toLocaleDateString();
+    const out = [`${barName} — ${t("Order")} ${when}`, ""];
+    for (const s of suppliers) {
+      const lines = s.items.filter((it) => packsFor(it) > 0);
+      if (!lines.length) continue;
+      out.push(s.supplier);
+      for (const it of lines) {
+        const unit = it.unit === "piece" ? "" : ` × ${Number(it.packSize)}${UNIT_LABEL[it.unit]}`;
+        out.push(`  ${it.name} — ${packsFor(it)}${unit}`);
+      }
+      out.push("");
+    }
+    return out.join("\n").trim();
+  };
+
+  const send = async () => {
+    const text = asText();
+    try {
+      // A phone can hand this straight to WhatsApp; a desktop gets the clipboard.
+      if (navigator.share) await navigator.share({ text });
+      else { await navigator.clipboard.writeText(text); flash(t("Order copied")); }
+    } catch { /* the person cancelled the share sheet */ }
+  };
+
+  if (!suppliers.length) {
+    return (
+      <Modal onClose={onCancel} width={360}>
+        <div style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 16 }}>
+          Nothing to order
+        </div>
+        <div style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim, marginTop: 6, lineHeight: 1.55 }}>
+          Everything is above its par level. If that seems wrong, check the
+          reorder points — an ingredient with none set is never counted as low.
+        </div>
+        <Btn variant="ghost" style={{ width: "100%", marginTop: 16 }} onClick={onCancel}>Close</Btn>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal onClose={onCancel} width={420}>
+      <div style={{ fontFamily: SANS, fontWeight: 700, color: C.cream, fontSize: 16 }}>
+        What to order
+      </div>
+      <div style={{ fontFamily: SANS, fontSize: 12.5, color: C.sageDim, marginTop: 4, marginBottom: 12, lineHeight: 1.5 }}>
+        Enough whole packs to get each one back to its par level. Change any
+        number before you send it.
+      </div>
+
+      <div style={{ maxHeight: 340, overflowY: "auto", display: "grid", gap: 16 }}>
+        {suppliers.map((s) => (
+          <div key={s.supplier}>
+            <Eyebrow style={{ marginBottom: 8 }}>{s.supplier}</Eyebrow>
+            <div style={{ display: "grid", gap: 8 }}>
+              {s.items.map((it) => (
+                <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: SANS, fontSize: 13.5, color: C.cream, overflow: "hidden",
+                      textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</div>
+                    <div style={{ fontFamily: MONO, fontSize: 11, color: C.sageDim, marginTop: 2 }}>
+                      {Math.round(Number(it.inStock))}{UNIT_LABEL[it.unit]} left · par {Math.round(Number(it.par))}{UNIT_LABEL[it.unit]}
+                    </div>
+                  </div>
+                  <input type="number" inputMode="numeric" min="0"
+                    value={qty[it.id] ?? it.packs}
+                    onChange={(e) => setQty({ ...qty, [it.id]: e.target.value })}
+                    style={{ width: 60, background: C.ink, border: `1px solid ${C.line}`, borderRadius: 8,
+                      padding: "8px 10px", color: C.cream, fontFamily: MONO, fontSize: 14,
+                      textAlign: "right", outline: "none" }} />
+                  <span style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim, width: 52 }}>
+                    {it.unit === "piece" ? "each" : `× ${Number(it.packSize)}${UNIT_LABEL[it.unit]}`}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline",
+        borderTop: `1px solid ${C.line}`, marginTop: 14, paddingTop: 12 }}>
+        <span style={{ fontFamily: SANS, fontSize: 12, color: C.sageDim }}>
+          Roughly what it costs
+        </span>
+        <span style={{ fontFamily: MONO, fontSize: 17, color: C.cream }}>{money(total, cur)}</span>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+        <Btn variant="ghost" style={{ flex: 1 }} onClick={onCancel}>Close</Btn>
+        <Btn variant="solid" icon={Share2} style={{ flex: 2 }} onClick={send}>Send the order</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 function IngredientEditor({ ing, cur, onCancel, onSave, onRemove }) {
   const [v, setV] = useState(ing);
   const unitCost = Number(v.packSize) > 0 ? Number(v.packCost) / Number(v.packSize) : 0;
@@ -3431,7 +3542,7 @@ function StockSheet({ mode, items, onCancel, onSubmit }) {
   );
 }
 
-function Stock({ venue, stock, loading, actions }) {
+function Stock({ venue, stock, loading, actions, onReorder }) {
   const cur = venue.currency;
   const [editing, setEditing] = useState(null);
   const [mode, setMode] = useState(null);     // 'delivery' | 'count'
@@ -3446,9 +3557,14 @@ function Stock({ venue, stock, loading, actions }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 16 }}>
         <Stat label="Stock on hand" value={money(Number(stock?.totalValue) || 0, cur)}
           sub={`${(stock?.items || []).length} ingredients`} />
-        <Stat label="Running low" value={stock?.lowCount ?? 0}
-          accent={(stock?.lowCount || 0) > 0 ? C.copper : C.cream}
-          sub={low.length ? low.slice(0, 3).map((i) => i.name).join(", ") : "nothing to reorder"} />
+        <button onClick={() => (stock?.lowCount ? onReorder() : null)}
+          disabled={!stock?.lowCount}
+          style={{ textAlign: "left", padding: 0, border: "none", background: "none",
+            cursor: stock?.lowCount ? "pointer" : "default" }}>
+          <Stat label="Running low" value={stock?.lowCount ?? 0}
+            accent={(stock?.lowCount || 0) > 0 ? C.copper : C.cream}
+            sub={low.length ? `tap to see what to order` : "nothing to reorder"} />
+        </button>
         <Stat label="Drinks with no recipe" value={stock?.noRecipe ?? 0}
           accent={(stock?.noRecipe || 0) > 0 ? C.brass : C.mint}
           sub={(stock?.noRecipe || 0) > 0 ? "their cost is guesswork" : "every drink is costed"} />
@@ -3461,6 +3577,7 @@ function Stock({ venue, stock, loading, actions }) {
             style={{ width: "100%", background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9,
               padding: "9px 12px 9px 32px", color: C.cream, fontFamily: SANS, fontSize: 13, outline: "none" }} />
         </div>
+        <Btn icon={ShoppingBag} onClick={onReorder}>Order</Btn>
         <Btn icon={TruckIcon} onClick={() => setMode("delivery")}>Delivery</Btn>
         <Btn icon={ClipboardCheck} onClick={() => setMode("count")}>Count</Btn>
         <Btn variant="solid" icon={Plus}
@@ -4466,6 +4583,13 @@ export default function App() {
   useEffect(() => {
     if (tab === "stock" || tab === "menu") loadStock();
   }, [tab, loadStock]);
+
+  const [reorder, setReorder] = useState(null);
+  const openReorder = useCallback(async () => {
+    if (!client || !venue) return;
+    try { setReorder(await api.loadReorder(client, venue.id)); }
+    catch (e) { flash(e.message); }
+  }, [client, venue, flash]);
   const [productsLoading, setProductsLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
 
@@ -5014,7 +5138,8 @@ export default function App() {
           />
         )}
         {isOwner && currentTab === "stock" && (
-          <Stock venue={venue} stock={stock} loading={stockLoading} actions={barActions} />
+          <Stock venue={venue} stock={stock} loading={stockLoading} actions={barActions}
+            onReorder={openReorder} />
         )}
         {isOwner && currentTab === "team" && (
           <Team venue={venue} staff={data.staff || []} events={securityEvents} flash={flash} actions={barActions} />
@@ -5077,6 +5202,11 @@ export default function App() {
           confirmLabel="Close the day" busy={sheetBusy}
           onCancel={() => setPrompt(null)}
           onConfirm={async () => { await doZReport(); setPrompt(null); }} />
+      )}
+
+      {reorder && (
+        <ReorderSheet data={reorder} cur={venue?.currency} barName={venue?.name}
+          flash={flash} onCancel={() => setReorder(null)} />
       )}
 
       {cashingUp && shift && (
