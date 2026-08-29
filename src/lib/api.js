@@ -205,6 +205,19 @@ export async function loadRecipe(client, articleId) {
   return unwrap(await client.rpc("article_recipe", { p_article: articleId }));
 }
 
+/** Sold as it comes: the article is its own stock item. */
+export async function linkArticleStock(client, articleId, unitsPerPack, unitCost) {
+  return unwrap(await client.rpc("link_article_stock", {
+    p_article: articleId,
+    p_units_per_pack: Number(unitsPerPack) || 1,
+    p_unit_cost: Number(unitCost) || 0,
+  }));
+}
+
+export async function unlinkArticleStock(client, articleId) {
+  unwrap(await client.rpc("unlink_article_stock", { p_article: articleId }));
+}
+
 export async function saveRecipe(client, articleId, items) {
   return unwrap(await client.rpc("set_recipe", {
     p_article: articleId,

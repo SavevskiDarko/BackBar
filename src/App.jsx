@@ -1650,6 +1650,20 @@ function PriceList({ articles, currency, actions, ingredients = [] }) {
                 if (r) { setRecipe(r); setEditing({ ...editing, cost: Number(r.cost) || 0 }); }
                 setRecipeBusy(false);
               }}
+              onLink={async (pack) => {
+                setRecipeBusy(true);
+                // The buy price on this form is what one unit costs.
+                await actions.linkArticleStock(editing.id, pack, editing.cost);
+                const r = await actions.loadRecipe(editing.id);
+                if (r) { setRecipe(r); setEditing({ ...editing, cost: Number(r.cost) || editing.cost }); }
+                setRecipeBusy(false);
+              }}
+              onUnlink={async () => {
+                setRecipeBusy(true);
+                await actions.unlinkArticleStock(editing.id);
+                setRecipe(await actions.loadRecipe(editing.id));
+                setRecipeBusy(false);
+              }}
             />
           )}
 
@@ -3254,9 +3268,11 @@ function packsLabel(item) {
 /* What a drink is made of. Lives in the article editor because that is where
    an owner already goes to think about a drink — and because the cost it
    computes replaces the number they would otherwise have to invent. */
-function RecipeEditor({ article, ingredients, recipe, cur, onChange, busy }) {
+function RecipeEditor({ article, ingredients, recipe, cur, onChange, onLink, onUnlink, busy }) {
   const [adding, setAdding] = useState(false);
   const items = recipe?.items || [];
+  const self = recipe?.self || null;          // set when sold as it comes
+  const [pack, setPack] = useState(self?.unitsPerPack || 24);
   const cost = items.reduce((a, i) => a + (Number(i.lineCost) || 0), 0);
   const margin = article.price > 0 ? ((article.price - cost) / article.price) * 100 : 0;
 
@@ -3279,7 +3295,53 @@ function RecipeEditor({ article, ingredients, recipe, cur, onChange, busy }) {
         {busy && <Loader2 size={12} color={C.sageDim} className="animate-spin" />}
       </div>
 
-      {!ingredients.length ? (
+      {/* Two genuinely different things. A cocktail is made from stock; a bottle
+          of beer IS stock. Asking for a recipe of one-of-itself was busywork. */}
+      <div style={{ display: "flex", gap: 8, marginTop: 8, marginBottom: 12 }}>
+        {[[false, "Made from ingredients"], [true, "Sold as it comes"]].map(([isSelf, label]) => (
+          <button key={label} disabled={busy}
+            onClick={() => (isSelf ? onLink(pack) : onUnlink())}
+            style={{
+              flex: 1, padding: "9px 8px", borderRadius: 10, cursor: "pointer",
+              border: `1px solid ${!!self === isSelf ? C.brass : C.line}`,
+              background: !!self === isSelf ? C.a10 : "transparent",
+              color: !!self === isSelf ? C.brass : C.sage,
+              fontFamily: SANS, fontSize: 12, fontWeight: 600, lineHeight: 1.3,
+            }}>{label}</button>
+        ))}
+      </div>
+
+      {self ? (
+        <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ fontFamily: SANS, fontSize: 12, color: C.sageDim, lineHeight: 1.5 }}>
+            Selling one takes one off the shelf. Deliveries are counted in cases,
+            which is how they arrive.
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontFamily: SANS, fontSize: 13, color: C.cream, flex: 1 }}>
+              How many in a case
+            </span>
+            <input type="number" inputMode="numeric" min="1" value={pack}
+              onChange={(e) => setPack(e.target.value)}
+              onBlur={() => onLink(pack)}
+              style={{ width: 74, background: C.ink, border: `1px solid ${C.line}`, borderRadius: 8,
+                padding: "8px 10px", color: C.cream, fontFamily: MONO, fontSize: 13,
+                textAlign: "right", outline: "none" }} />
+          </div>
+          <div style={{ background: C.ink, border: `1px solid ${C.line}`, borderRadius: 9, padding: "10px 12px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ fontFamily: SANS, fontSize: 12, color: C.sageDim }}>On the shelf</span>
+              <span style={{ fontFamily: MONO, fontSize: 13.5, color: C.cream }}>
+                {Math.round(Number(self.inStock) || 0)}
+              </span>
+            </div>
+            <div style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim, marginTop: 6, lineHeight: 1.45 }}>
+              Counted and reordered under Stock, like everything else. The buy
+              price above is what one costs you.
+            </div>
+          </div>
+        </div>
+      ) : !ingredients.length ? (
         <div style={{ fontFamily: SANS, fontSize: 12, color: C.sageDim, lineHeight: 1.5, marginTop: 6 }}>
           Add what you buy under Stock first — bottles, kegs, cases — then a
           recipe here works out what this drink costs.
@@ -4761,6 +4823,16 @@ export default function App() {
       return res;
     },
     saveRecipe: (articleId, items) => guard((c) => api.saveRecipe(c, articleId, items)),
+    linkArticleStock: async (articleId, pack, unitCost) => {
+      const ok = await guard((c) => api.linkArticleStock(c, articleId, pack, unitCost));
+      if (ok) loadStock();
+      return ok;
+    },
+    unlinkArticleStock: async (articleId) => {
+      const ok = await guard((c) => api.unlinkArticleStock(c, articleId));
+      if (ok) loadStock();
+      return ok;
+    },
 
     startShift: () => setPrompt({ kind: "float" }),
     openShiftWith: async (amount) => {
@@ -5201,7 +5273,7 @@ export default function App() {
         )}
         {isOwner && currentTab === "menu" && (
           <PriceList articles={articles} currency={venue.currency} actions={barActions}
-            ingredients={stock?.items || []} />
+            ingredients={(stock?.items || []).filter((i) => !i.is_article)} />
         )}
         {isOwner && currentTab === "reports" && (
           <Reports
