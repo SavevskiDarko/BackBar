@@ -11,7 +11,8 @@
     "tail": "wrangler tail",
     "prebuild": "node scripts/check-env.mjs",
     "lint": "eslint --no-eslintrc -c .eslintrc.json --resolve-plugins-relative-to . src/",
-    "check": "npm run lint && node scripts/checks.mjs"
+    "test": "node --test 'test/*.test.mjs'",
+    "check": "npm run lint && npm test && node scripts/checks.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

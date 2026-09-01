@@ -21,6 +21,11 @@ import {
 import { useBarData } from "./lib/useBarData";
 import { useBackLayer, useExitGuard } from "./lib/useBackButton";
 import { t, setLang, recallLang, LANGUAGES } from "./lib/i18n";
+import {
+  DAY, round2, clamp, CURRENCIES, curOf, amount, money, failedValue, since, shortDate,
+  daysBetween, subState, canOperate, startOfWeek, iso, periodRange, periodLabel,
+  stepAnchor,
+} from "./lib/format";
 import * as api from "./lib/api";
 import * as fiscal from "./lib/fiscal";
 import { WifiOff, RefreshCw, Download } from "lucide-react";
@@ -65,33 +70,11 @@ const MONO = "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospac
 const SANS = "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 
 const PLAN_W = 1000, PLAN_H = 700;
-const DAY = 86400000;
 
 const PLANS = {
   starter: { id: "starter", name: "Starter", price: 29, maxRooms: 1, maxTables: 16, maxStaff: 3 },
   pro: { id: "pro", name: "Pro", price: 59, maxRooms: 5, maxTables: 60, maxStaff: 15 },
   chain: { id: "chain", name: "Chain", price: 119, maxRooms: 20, maxTables: 400, maxStaff: 100 },
-};
-
-/* ---------------------------------------------------------------- utilities */
-
-const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
-const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
-
-/* Not every currency is a symbol in front of two decimals. The denar goes
-   after the number and is written in whole units — "250 ден", not "MKD250.00".
-   Anything not listed falls back to being treated as a leading symbol, so a
-   bar can still type something unusual and get a sensible result. */
-export const CURRENCIES = {
-  MKD: { label: "Denar", sign: "ден", after: true, decimals: 0 },
-  RSD: { label: "Dinar", sign: "дин", after: true, decimals: 0 },
-  BGN: { label: "Lev", sign: "лв", after: true, decimals: 2 },
-  ALL: { label: "Lek", sign: "L", after: true, decimals: 0 },
-  EUR: { label: "Euro", sign: "€", after: false, decimals: 2 },
-  USD: { label: "Dollar", sign: "$", after: false, decimals: 2 },
-  GBP: { label: "Pound", sign: "£", after: false, decimals: 2 },
-  CHF: { label: "Franc", sign: "CHF", after: true, decimals: 2 },
-  TRY: { label: "Lira", sign: "₺", after: false, decimals: 2 },
 };
 
 /* A bar carries three VAT rates at once. The rate belongs to the item, not the
@@ -104,51 +87,6 @@ const VAT_RATES = [
   { rate: 0,  label: "0% · exempt" },
 ];
 
-const curOf = (cur) =>
-  CURRENCIES[String(cur || "EUR").toUpperCase()] ||
-  { sign: cur || "€", after: false, decimals: 2 };
-
-/** Just the number, correctly rounded for the currency. Use where a column
-    header already carries the sign. */
-function amount(n, cur) {
-  const { decimals } = curOf(cur);
-  const v = Number.isFinite(n) ? n : 0;
-  return v.toLocaleString(undefined, {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
-}
-
-/** The full thing: 250 ден · €12.50 */
-function money(n, cur = "EUR") {
-  const c = curOf(cur);
-  const v = amount(n, cur);
-  return c.after ? `${v} ${c.sign}` : `${c.sign}${v}`;
-}
-
-function since(ts, now) {
-  const m = Math.max(0, Math.floor((now - ts) / 60000));
-  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
-}
-function shortDate(ts) {
-  return new Date(ts).toLocaleDateString(undefined, { day: "numeric", month: "short" });
-}
-function daysBetween(a, b) {
-  return Math.round((a - b) / DAY);
-}
-
-/* ---------------------------------------------------- subscription lifecycle
-   This mirrors bar_is_live() in the database. It exists only to render banners
-   and pills — the database is what actually enforces access, so a tampered
-   copy of this function gains nobody anything. */
-
-function subState(venue, now) {
-  const s = venue.subscription;
-  if (s.suspended) return "suspended";
-  if (s.trialEndsAt && now < s.trialEndsAt) return "trial";
-  if (now <= s.nextDueAt) return "active";
-  return daysBetween(now, s.nextDueAt) <= (s.graceDays ?? 7) ? "past_due" : "locked";
-}
 const STATE_META = {
   active: { label: "Paid", color: C.mint },
   trial: { label: "Trial", color: C.mint },
@@ -156,7 +94,6 @@ const STATE_META = {
   locked: { label: "Locked — unpaid", color: C.copper },
   suspended: { label: "Suspended", color: C.copper },
 };
-const canOperate = (st) => st === "active" || st === "trial" || st === "past_due";
 /* ------------------------------------------------------------- UI primitives */
 
 function Eyebrow({ children, style }) {
@@ -1694,59 +1631,6 @@ function PriceList({ articles, currency, actions, ingredients = [] }) {
 
 /* ---------------------------------------------------------------- reporting */
 
-const startOfWeek = (d) => {                    // Monday
-  const x = new Date(d);
-  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
-  return x;
-};
-const iso = (d) => {
-  const x = new Date(d);
-  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
-};
-
-/** The range on screen, and how to step it. Everything is a business day —
-    see business_day() in reports.sql for why a bar's Friday runs past midnight. */
-function periodRange(mode, anchor) {
-  const a = new Date(anchor);
-  if (mode === "day") return { from: iso(a), to: iso(a) };
-  if (mode === "week") {
-    const s = startOfWeek(a);
-    const e = new Date(s); e.setDate(s.getDate() + 6);
-    return { from: iso(s), to: iso(e) };
-  }
-  const s = new Date(a.getFullYear(), a.getMonth(), 1);
-  const e = new Date(a.getFullYear(), a.getMonth() + 1, 0);
-  return { from: iso(s), to: iso(e) };
-}
-
-function periodLabel(mode, anchor) {
-  const a = new Date(anchor);
-  const today = new Date();
-  if (mode === "day") {
-    const same = iso(a) === iso(today);
-    const y = new Date(today); y.setDate(today.getDate() - 1);
-    if (same) return "Today";
-    if (iso(a) === iso(y)) return "Yesterday";
-    return a.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
-  }
-  if (mode === "week") {
-    const { from, to } = periodRange("week", a);
-    const f = new Date(from), t = new Date(to);
-    if (iso(startOfWeek(today)) === from) return "This week";
-    return `${f.getDate()} – ${t.getDate()} ${t.toLocaleDateString(undefined, { month: "short" })}`;
-  }
-  if (a.getMonth() === today.getMonth() && a.getFullYear() === today.getFullYear()) return "This month";
-  return a.toLocaleDateString(undefined, { month: "long", year: "numeric" });
-}
-
-function stepAnchor(mode, anchor, dir) {
-  const a = new Date(anchor);
-  if (mode === "day") a.setDate(a.getDate() + dir);
-  else if (mode === "week") a.setDate(a.getDate() + 7 * dir);
-  else a.setMonth(a.getMonth() + dir);
-  return a;
-}
-
 function Delta({ now, before }) {
   if (!before) return null;
   const pct = ((now - before) / before) * 100;
@@ -3108,6 +2992,80 @@ function AmountPrompt({ title, hint, label, cur, note, confirmLabel = "Confirm",
   );
 }
 
+/* ------------------------------------------------------------- dead letters
+
+   Writes the outbox could not send and will not retry. Each one is a thing a
+   waiter did that the books never heard about, so the only honest thing to do
+   is show it, say what it was, and let the owner square it by hand. Dismissing
+   is deliberate and one at a time: this list should never clear itself. */
+
+const FAILED_LABEL = {
+  "order.save": "Table saved",
+  "order.close": "Bill closed",
+  "order.payPart": "Part payment",
+  "order.void": "Item taken off",
+  "order.cancel": "Table cancelled",
+};
+
+function FailedWrites({ items, cur, onDismiss, onClose }) {
+  return (
+    <Modal onClose={onClose} width={560}>
+      <Eyebrow>Not saved</Eyebrow>
+      <div style={{ fontSize: 17, fontWeight: 700, color: C.cream, margin: "8px 0 6px" }}>
+        {items.length === 1 ? "One change never reached the server" : `${items.length} changes never reached the server`}
+      </div>
+      <div style={{ fontSize: 12.5, color: C.sage, lineHeight: 1.55, marginBottom: 14 }}>
+        These were tried and rejected, so the queue stopped carrying them — they are
+        not in tonight's takings. Put each one right in the till or the price list,
+        then clear it from this list.
+      </div>
+
+      <div style={{ display: "grid", gap: 8, maxHeight: 340, overflowY: "auto" }}>
+        {items.map((it) => {
+          const p = it.payload || {};
+          const value = failedValue(it);
+          return (
+            <div key={it.seq} style={{
+              border: "1px solid rgba(212,103,74,0.35)", background: "rgba(212,103,74,0.07)",
+              borderRadius: 10, padding: "10px 12px",
+            }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 700, color: C.cream }}>
+                  {FAILED_LABEL[it.op] || it.op}
+                </span>
+                {p.tableLabel && (
+                  <span style={{ fontSize: 12.5, color: C.sage }}>{p.tableLabel}</span>
+                )}
+                <span style={{ flex: 1 }} />
+                {value != null && (
+                  <span style={{ fontFamily: MONO, fontSize: 13, color: C.brass }}>
+                    {money(value, cur)}
+                  </span>
+                )}
+              </div>
+              <div style={{ fontFamily: MONO, fontSize: 11, color: C.copper, marginTop: 5, lineHeight: 1.45 }}>
+                {it.lastError || "no reason recorded"}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+                <span style={{ fontSize: 11, color: C.sageDim }}>
+                  {new Date(it.failedAt).toLocaleString()}
+                  {p.staffName ? ` · ${p.staffName}` : ""}
+                </span>
+                <span style={{ flex: 1 }} />
+                <Btn size="sm" onClick={() => onDismiss(it.seq)}>Sorted</Btn>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
+        <Btn onClick={onClose}>Close</Btn>
+      </div>
+    </Modal>
+  );
+}
+
 function Confirm({ title, body, confirmLabel = "Yes", danger, onCancel, onConfirm, busy }) {
   return (
     <Modal onClose={onCancel} width={340}>
@@ -4341,8 +4299,9 @@ export default function App() {
   /* ---- the bar's live data ---- */
   const {
     data, loading, error: dataError, refresh, write, sync, clearError,
-    online, syncing, pendingCount,
+    online, syncing, pendingCount, failed, dismissFailed,
   } = useBarData(session && session.role !== "platform" ? session : null);
+  const [showFailed, setShowFailed] = useState(false);
   const client = useMemo(() => (session ? clientFor(session) : null), [session]);
 
   const venueRaw = data?.venue || null;
@@ -5141,6 +5100,19 @@ export default function App() {
               </span>
             </button>
           )}
+          {/* Writes the queue gave up on. Loud on purpose: each one is usually
+              a bill, and the bar is short that money until someone looks. */}
+          {!isPlatform && failed.length > 0 && (
+            <button onClick={() => setShowFailed(true)} title="These never reached the server" style={{
+              display: "flex", alignItems: "center", gap: 7, padding: "6px 12px", borderRadius: 99,
+              border: "1px solid rgba(212,103,74,0.55)", background: "rgba(212,103,74,0.12)", cursor: "pointer",
+            }}>
+              <AlertTriangle size={13} color={C.copper} />
+              <span style={{ fontFamily: MONO, fontSize: 12, color: C.copper, fontWeight: 600 }}>
+                {failed.length} not saved
+              </span>
+            </button>
+          )}
           {!isPlatform && loading && <Loader2 size={14} color={C.sageDim} className="animate-spin" />}
 
           {isOwner && (
@@ -5371,6 +5343,11 @@ export default function App() {
       {reorder && (
         <ReorderSheet data={reorder} cur={venue?.currency} barName={venue?.name}
           flash={flash} onCancel={() => setReorder(null)} />
+      )}
+
+      {showFailed && failed.length > 0 && (
+        <FailedWrites items={failed} cur={venue?.currency}
+          onDismiss={dismissFailed} onClose={() => setShowFailed(false)} />
       )}
 
       {cashingUp && shift && (

@@ -1,5 +1,5 @@
-import { supabase } from "./supabase";
-import { clearOutbox } from "./db";
+import { supabase } from "./supabase.js";
+import { clearOutbox } from "./db.js";
 
 /* ===========================================================================
    Every read and write the app makes.

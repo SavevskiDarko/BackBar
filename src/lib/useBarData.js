@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { clientFor } from "./auth";
-import { loadBar, outboxHandlers } from "./api";
-import { saveSnapshot, loadSnapshot, enqueue, peekOutbox, applyOutbox } from "./db";
-import { drainOutbox, watchConnection } from "./sync";
+import { clientFor } from "./auth.js";
+import { loadBar, outboxHandlers } from "./api.js";
+import {
+  saveSnapshot, loadSnapshot, enqueue, peekOutbox, applyOutbox,
+  listFailed, dismissFailed as dropFailed,
+} from "./db.js";
+import { drainOutbox, watchConnection } from "./sync.js";
 
 /* ===========================================================================
    useBarData — the floor, live and offline-tolerant.
@@ -25,6 +28,7 @@ export function useBarData(session) {
     typeof navigator === "undefined" ? true : navigator.onLine);
   const [syncing, setSyncing] = useState(false);
   const [fromCache, setFromCache] = useState(false);
+  const [failed, setFailed] = useState([]);     // writes the queue gave up on
 
   const refetchTimer = useRef(null);
   const barId = session?.barId;
@@ -33,6 +37,13 @@ export function useBarData(session) {
 
   const refreshPending = useCallback(async () => {
     setPending(await peekOutbox());
+    setFailed(await listFailed());
+  }, []);
+
+  /** The owner has dealt with a write that could never be sent. */
+  const dismissFailed = useCallback(async (seq) => {
+    await dropFailed(seq);
+    setFailed(await listFailed());
   }, []);
 
   const refresh = useCallback(async () => {
@@ -166,6 +177,8 @@ export function useBarData(session) {
     syncing,
     fromCache,
     pendingCount: pending.length,
+    failed,
+    dismissFailed,
     refresh,
     write,
     sync,

@@ -1,4 +1,4 @@
-import { peekOutbox, dropFromOutbox, markTried, outboxCount } from "./db";
+import { peekOutbox, dropFromOutbox, markTried, outboxCount, moveToFailed } from "./db.js";
 
 /* ===========================================================================
    Sync — draining the outbox.
@@ -30,14 +30,14 @@ const PERMANENT = [
   "invalid input syntax",
 ];
 
-function isPermanent(message = "") {
+export function isPermanent(message = "") {
   const m = message.toLowerCase();
   return PERMANENT.some((p) => m.includes(p));
 }
 
 /** Network failures throw TypeError from fetch; everything else came back from
     Postgres, which means the request arrived and was understood. */
-function isOffline(err) {
+export function isOffline(err) {
   return (
     !navigator.onLine ||
     err?.name === "TypeError" ||
@@ -65,8 +65,11 @@ export async function drainOutbox(client, handlers, onChange) {
     for (const item of items) {
       const handler = handlers[item.op];
       if (!handler) {
-        // An operation from an older version of the app. Nothing can replay it.
-        await dropFromOutbox(item.seq);
+        // An operation from an older version of the app. Nothing can replay it,
+        // but it was still someone's write, so it is kept where it can be seen.
+        await moveToFailed(item, `this version of Backbar cannot send a "${item.op}"`);
+        failed++;
+        onChange?.();
         continue;
       }
 
@@ -81,9 +84,13 @@ export async function drainOutbox(client, handlers, onChange) {
           break;
         }
         if (isPermanent(err.message) || item.tries >= 5) {
-          // This will never succeed. Drop it rather than block everything behind it.
-          console.warn("Backbar: dropping unsyncable change", item.op, err.message);
-          await dropFromOutbox(item.seq);
+          /* This will never succeed, so it must come out of the queue — but it
+             is usually a bill, and deleting it would take real money off the
+             books with nothing to show for it. It goes to the dead letter,
+             where the owner can see it and put it right. If even that fails,
+             leave it queued: better stuck than gone. */
+          const kept = await moveToFailed(item, err.message);
+          if (!kept) break;
           failed++;
           onChange?.();
         } else {

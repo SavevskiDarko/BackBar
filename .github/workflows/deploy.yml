@@ -46,6 +46,10 @@ jobs:
       # would otherwise ship straight to a bar's tablet.
       - run: npm run lint
 
+      # The money arithmetic and the offline fold. A bar's takings are printed
+      # from these, so a red test must stop the deploy.
+      - run: npm test
+
       # `prebuild` refuses to build without these two, which is the point:
       # missing them produces a green build of a "Not configured yet" screen.
       - run: npm run build

@@ -1,4 +1,4 @@
-import { supabase, staffClient, AUTH_URL } from "./supabase";
+import { supabase, staffClient, AUTH_URL } from "./supabase.js";
 
 /* ===========================================================================
    Sessions
