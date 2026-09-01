@@ -25,4 +25,30 @@ export default defineConfig({
     __BUILD_ID__: JSON.stringify(BUILD_ID),
   },
   base: "/",
+  build: {
+    rollupOptions: {
+      output: {
+        /* One bundle meant every deploy re-downloaded everything. Where the
+           weight actually is, gzipped:
+
+             supabase  56 kB   changes when we upgrade it
+             react     45 kB   changes when we upgrade it
+             app       55 kB   changes every single deploy
+             icons      4 kB   (lucide tree-shakes properly; nothing to fix)
+
+           Two thirds of it is libraries that had been changing their filename
+           on every release for no reason. Split apart, and with /assets/*
+           served immutable for a year (see public/_headers), a wall tablet
+           reloading after a deploy fetches the 55 kB that changed and takes
+           the rest from cache. */
+        manualChunks: (id) => {
+          if (!id.includes("node_modules")) return undefined;
+          if (id.includes("/react") || id.includes("/scheduler")) return "react";
+          if (id.includes("/@supabase")) return "supabase";
+          if (id.includes("/lucide-react")) return "icons";
+          return "vendor";
+        },
+      },
+    },
+  },
 });
