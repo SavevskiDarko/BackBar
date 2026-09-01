@@ -82,7 +82,9 @@ Postgres, auth, realtime and row-level security in one free tier. Realtime
 matters here — it's what makes a table light up on every tablet at once.
 
 1. Create a project at [supabase.com](https://supabase.com)
-2. SQL Editor → paste **`supabase/schema.sql`** → Run
+2. Apply **`supabase/migrations/`** in filename order — `supabase db push`, or
+   paste each file into the SQL editor. See `supabase/migrations/README.md`,
+   especially if the project is one that already had these run by hand.
 3. Project Settings → API → copy the URL and the `anon` key
 4. `cp .env.example .env.local` and fill them in
 5. In GitHub: Settings → Secrets and variables → Actions → add the same two
@@ -95,7 +97,7 @@ the app already uses.
 
 ### What the schema guarantees
 
-Read the comments in `schema.sql`; the short version:
+Read the comments in the first migration, `..._schema.sql`; the short version:
 
 - **`bar_is_live()`** gates every policy. An unpaid bar can't read or write
   anything, and no browser tampering changes that.
@@ -109,9 +111,9 @@ Read the comments in `schema.sql`; the short version:
 
 ### What's built
 
-- **`supabase/schema.sql`** — tables and RLS
-- **`supabase/rpc.sql`** — login throttling, server-side price stamping, atomic
-  bill closing, platform billing calls
+- **`supabase/migrations/`** — the database, in the order it must be applied:
+  tables and RLS, then login throttling, server-side price stamping, atomic bill
+  closing, platform billing, and every feature since
 - **`worker/`** — the `backbar-auth` Cloudflare Worker: verifies PINs, mints scoped JWTs
 - **`src/lib/`** — client, auth, data layer, realtime hook
 
@@ -148,8 +150,10 @@ src/lib/supabase.js             client setup
 src/lib/auth.js                 pairing, PIN login, platform login
 src/lib/api.js                  every read and write
 src/lib/useBarData.js           realtime floor
-supabase/schema.sql             tables + RLS          (run first)
-supabase/rpc.sql                functions             (run second)
+src/lib/format.js               money, dates, subscription state
+src/lib/db.js                   offline snapshot, outbox, dead letter
+test/                           the money and offline arithmetic
+supabase/migrations/            the database, in apply order
 worker/                         the Worker: PIN → JWT, serves the app
 docs/fiscal-bridge.md           contract for a licensed fiscal printer
 PORTING.md                      history of the Supabase port

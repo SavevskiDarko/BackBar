@@ -10,10 +10,15 @@ npm i @supabase/supabase-js
 supabase link --project-ref YOUR_REF
 ```
 
-In the SQL editor, run in order:
+Apply the database:
 
-1. `supabase/schema.sql`
-2. `supabase/rpc.sql`
+```bash
+supabase db push
+```
+
+That runs `supabase/migrations/` in filename order. Against a project that
+already had this SQL applied by hand, read `supabase/migrations/README.md`
+first — it needs `migration repair`, not a second run.
 
 Then deploy the auth Worker:
 
