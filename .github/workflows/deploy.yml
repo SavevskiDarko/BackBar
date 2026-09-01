@@ -1,0 +1,60 @@
+# Every push to main builds the app and pushes it to Cloudflare, Worker and
+# static assets together, in about a minute. Nobody runs a build by hand.
+#
+# Four repository secrets make this work
+# (Settings → Secrets and variables → Actions → New repository secret):
+#
+#   CLOUDFLARE_API_TOKEN     dash.cloudflare.com → My Profile → API Tokens,
+#                            template "Edit Cloudflare Workers"
+#   CLOUDFLARE_ACCOUNT_ID    the hex id in any dashboard URL, or `npx wrangler whoami`
+#   VITE_SUPABASE_URL        same value as .env.local
+#   VITE_SUPABASE_ANON_KEY   same value as .env.local
+#
+# The two VITE_ ones are baked into the browser bundle and are public by design
+# — the anon key is meant to be; row-level security is what protects the data.
+# The service_role key is NOT here and must never be: it lives only in Worker
+# secrets (`npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY`).
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time. Never cancel one mid-flight — a half-uploaded Worker is
+# worse than a queued one.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Cheap, and it catches the hook and undefined-variable mistakes that
+      # would otherwise ship straight to a bar's tablet.
+      - run: npm run lint
+
+      # `prebuild` refuses to build without these two, which is the point:
+      # missing them produces a green build of a "Not configured yet" screen.
+      - run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      # The repo's own pinned wrangler, so CI and your laptop deploy the same way.
+      - run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

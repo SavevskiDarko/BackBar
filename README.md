@@ -31,20 +31,34 @@ step 3, seeded demo PINs.
 
 ## 2. Deploy on every push
 
-**Vercel — recommended.** No config file, no workflow, works with the serverless
-functions you'll need later for Stripe.
+One Worker serves everything — the React app as static assets and the auth API
+at `/api/auth`, same origin, no CORS, one bill. `.github/workflows/deploy.yml`
+builds and ships it on every push to `main`, in about a minute.
 
-1. [vercel.com](https://vercel.com) → **Add New → Project** → import the repo
-2. It detects Vite on its own. Press Deploy.
-3. Done. Every `git push` to `main` is live in about 40 seconds, and every pull
-   request gets its own preview URL to test on a real phone before merging.
+It needs four repository secrets. **Settings → Secrets and variables → Actions
+→ New repository secret**:
 
-Add a custom domain under Project → Settings → Domains.
+| Secret | Where it comes from |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | Cloudflare → My Profile → API Tokens → template **Edit Cloudflare Workers** |
+| `CLOUDFLARE_ACCOUNT_ID` | the hex id in any dashboard URL, or `npx wrangler whoami` |
+| `VITE_SUPABASE_URL` | same value as your `.env.local` |
+| `VITE_SUPABASE_ANON_KEY` | same value as your `.env.local` |
 
-Deploys are automatic from here on. Nobody runs a build by hand.
+The two `VITE_` ones are baked into the browser bundle and are public by design.
+The `service_role` key is not among them and never should be — it lives only in
+Worker secrets (`npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY`).
 
-Don't add a second deploy path (GitHub Pages, Vercel) alongside this one — the
-unused one silently rots and then starts emailing you about failed builds.
+Until all four exist the run fails at the build or the deploy step. Watch the
+first one under the repo's **Actions** tab; after that, pushing is deploying.
+Deploy by hand with `npm run deploy`, or from the Actions tab with **Run
+workflow**, when you need to.
+
+Add a custom domain under the Worker → Settings → Domains & Routes.
+
+Don't add a second deploy path (Vercel, GitHub Pages, or Cloudflare's own
+dashboard Git integration) alongside this one — the unused one silently rots and
+then starts emailing you about failed builds.
 
 ## 3. Add the database
 
@@ -71,7 +85,7 @@ matters here — it's what makes a table light up on every tablet at once.
 2. SQL Editor → paste **`supabase/schema.sql`** → Run
 3. Project Settings → API → copy the URL and the `anon` key
 4. `cp .env.example .env.local` and fill them in
-5. In Vercel: Settings → Environment Variables → add the same two
+5. In GitHub: Settings → Secrets and variables → Actions → add the same two
 6. `npm i @supabase/supabase-js`
 
 Then rewrite the `sget`/`sset` functions at the top of `src/App.jsx` to read and
