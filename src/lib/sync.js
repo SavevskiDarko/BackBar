@@ -19,6 +19,12 @@ const PERMANENT = [
   "bad_method",
   "bad_discount",
   "order_already_closed",
+  // A part-payment replayed after the table moved on: the lines it names are
+  // gone or already paid. Retrying can't bring them back, and leaving it at the
+  // head of the queue would hold up every write behind it.
+  "line_not_on_this_table",
+  "more_than_is_on_the_table",
+  "nothing_selected",
   "row-level security",
   "violates foreign key",
   "invalid input syntax",

@@ -5,3 +5,8 @@ dist
 .DS_Store
 *.log
 .vercel
+
+# The fiscal bridge's record of what it has already printed. Runtime state, and
+# it holds a real bar's receipts — bill lines, staff names, receipt numbers.
+# The bridge recreates it on first run.
+bridge/printed.json

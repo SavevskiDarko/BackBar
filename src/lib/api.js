@@ -280,15 +280,27 @@ export const outboxHandlers = {
       staff: { id: p.staffId, name: p.staffName },
       openedAt: p.openedAt,
     }),
+  /* payments and customer must be replayed too. Without them a split tender
+     closed offline comes back as one method for the whole amount — the bill
+     balances, so nothing errors, and the cash/card split is quietly wrong in
+     the drawer count and the Z report. The customer tax id matters for the
+     same reason: the fiscal receipt printed on retry needs it. */
   "order.close": (client, p) =>
     closeBill(client, {
       orderId: p.orderId, billId: p.billId,
       method: p.method, paid: p.paid, discount: p.discount,
+      payments: p.payments, customer: p.customer,
     }),
   "order.cancel": (client, p) => cancelOrder(client, p.orderId),
   "order.void": (client, p) =>
     voidOrderLine(client, { lineId: p.lineId, qty: p.qty, reason: p.reason,
       kind: p.kind, consumed: p.consumed }),
+  "order.payPart": (client, p) =>
+    payPartOfOrder(client, {
+      orderId: p.orderId, billId: p.billId, lines: p.lines,
+      method: p.method, paid: p.paid, discount: p.discount,
+      payments: p.payments, customer: p.customer,
+    }),
 };
 
 /** Owner settling something a waiter marked unpaid. */

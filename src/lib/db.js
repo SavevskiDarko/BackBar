@@ -165,6 +165,23 @@ export function applyOutbox(snapshot, outbox) {
     if (item.op === "order.close" || item.op === "order.cancel") {
       delete orders[p.orderId];
     }
+    /* One guest settling their share offline. What they paid for comes off the
+       table; if that was everything, the table is free again. */
+    if (item.op === "order.payPart") {
+      const o = orders[p.orderId];
+      if (o) {
+        const paidFor = new Map((p.lines || []).map((l) => [l.id || l.articleId, l.qty]));
+        const left = o.lines
+          .map((l) => {
+            const q = paidFor.get(l.id || l.articleId);
+            return q ? { ...l, qty: l.qty - q } : l;
+          })
+          .filter((l) => l.qty > 0);
+        if (left.length) orders[p.orderId] = { ...o, lines: left, pending: true };
+        else delete orders[p.orderId];
+      }
+    }
+
     // A void taken while offline should still leave the table looking right.
     if (item.op === "order.void") {
       const o = orders[p.orderId];

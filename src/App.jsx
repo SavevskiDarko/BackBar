@@ -4515,10 +4515,20 @@ export default function App() {
     setSheetBusy(true);
     try {
       const billId = crypto.randomUUID();
-      const bill = await api.payPartOfOrder(client, {
-        orderId: openOrder.id, billId, lines: chosen, method, paid: true,
-      });
-      await refresh();
+
+      /* The total is worked out here rather than read off the returned bill,
+         because queued offline there is no bill yet. These are the prices the
+         server stamped on the lines and a part-payment takes no discount, so
+         it matches what the database records. */
+      const total = round2(chosen.reduce((a, l) => a + l.price * l.qty, 0));
+
+      const res = await write(
+        "order.payPart",
+        { orderId: openOrder.id, billId, lines: chosen, method, paid: true },
+        (c) => api.payPartOfOrder(c, {
+          orderId: openOrder.id, billId, lines: chosen, method, paid: true,
+        })
+      );
 
       /* Did that clear the table? Work it out from what was taken rather than
          waiting for state to settle. */
@@ -4527,15 +4537,17 @@ export default function App() {
         return c && c.qty >= l.qty;
       });
 
+      const tail = res === "queued" ? " (will sync)" : "";
       if (takenAll) {
         setOpenTableId(null); setTakeaway(null);
-        flash(`Paid ${money(bill.total, venue.currency)} — table closed`);
+        flash(`Paid ${money(total, venue.currency)} — table closed${tail}`);
       } else {
         // The sheet stays open, so tell it to re-read the remaining lines.
         setSheetSync((n) => n + 1);
-        flash(`Paid ${money(bill.total, venue.currency)} — the rest stays on the table`);
+        flash(`Paid ${money(total, venue.currency)} — the rest stays on the table${tail}`);
       }
-      if (venue.fiscalEnabled && venue.fiscalBridgeUrl) printFiscal(billId);
+      // A queued sale gets its receipt from the fiscal retry once it syncs.
+      if (res !== "queued" && venue.fiscalEnabled && venue.fiscalBridgeUrl) printFiscal(billId);
     } catch (e) { flash(e.message); }
     finally { setSheetBusy(false); }
   };
