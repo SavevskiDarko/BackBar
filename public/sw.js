@@ -61,7 +61,12 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.startsWith("/api/")) return;
 
   // Never cache the worker or the manifest — that is how a device gets stuck.
-  if (url.pathname === "/sw.js" || url.pathname === "/manifest.webmanifest") return;
+  // build-id.txt is on the list for the opposite reason: it is how a stuck
+  // device finds out. The app reads it to compare what is running against what
+  // is deployed, so a cached copy would agree with itself forever.
+  if (url.pathname === "/sw.js" ||
+      url.pathname === "/manifest.webmanifest" ||
+      url.pathname === "/build-id.txt") return;
 
   // Navigations: network first so a deploy is picked up, cache as the fallback
   // so the app still opens with no signal.
