@@ -34,7 +34,14 @@
 --
 -- Reported per product alongside the totals, so the owner can see that a
 -- profit covers nine of eleven units rather than guessing.
+--
+-- Dropped first, not replaced: two columns are being added and `create or
+-- replace` cannot change a function's OUT parameters. Nothing is lost with it
+-- — this function carries no grants of its own, and the guard that matters is
+-- the is_owner_of check in its body.
 -- ---------------------------------------------------------------------------
+drop function if exists bar_products_sold(uuid, date, date);
+
 create or replace function bar_products_sold(
   p_bar uuid, p_from date, p_to date
 ) returns table (
