@@ -396,6 +396,23 @@ export async function loadProductsSold(client, barId, from, to) {
   }));
 }
 
+/** How much of one article's history was sold before it had a buy price.
+    Those sales recorded a cost of zero, so they report as pure profit. */
+export async function uncostedSales(client, barId, articleId) {
+  return unwrap(await client.rpc("article_uncosted_sales", {
+    p_bar: barId, p_article: articleId,
+  }));
+}
+
+/** Put a cost onto the sales that never recorded one. Lines that recorded a
+    real cost are left alone, so this fills a gap rather than restating a month
+    that was already priced correctly. */
+export async function backfillArticleCost(client, barId, articleId, cost) {
+  return unwrap(await client.rpc("backfill_article_cost", {
+    p_bar: barId, p_article: articleId, p_cost: cost,
+  }));
+}
+
 /** Change your own PIN. Requires the current one — a session token alone must
     not be enough to lock the real owner out of their bar. */
 export async function changeOwnPin(client, currentPin, newPin) {

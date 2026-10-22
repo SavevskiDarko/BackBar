@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  round2, clamp, curOf, money, linesTotal, failedValue, since, daysBetween,
+  round2, clamp, curOf, money, linesTotal, failedValue, soldCostState, since, daysBetween,
   subState, canOperate, startOfWeek, iso, periodRange, stepAnchor,
 } from "../src/lib/format.js";
 
@@ -93,6 +93,52 @@ test("failedValue says nothing rather than zero when it cannot tell", () => {
   assert.equal(failedValue({ payload: {} }), null);
   assert.equal(failedValue({}), null);
   assert.equal(failedValue(undefined), null);
+});
+
+/* Items sold before anyone entered what they cost.
+
+   Those sales recorded a cost of zero, which the report counts as pure profit.
+   A product can be a mix — some units sold before the buy price existed, some
+   after — and that mixed case is the one that used to go by in silence. */
+
+test("a product fully priced reports its profit plainly", () => {
+  assert.deepEqual(soldCostState({ qty: 5, cost: 125, qty_costed: 5 }),
+    { kind: "full", qty: 5, costed: 5 });
+});
+
+test("a product never priced says so instead of claiming the lot as profit", () => {
+  assert.deepEqual(soldCostState({ qty: 3, cost: 0, qty_costed: 0 }),
+    { kind: "none", qty: 3, costed: 0 });
+});
+
+test("the mixed case is called out, not averaged away", () => {
+  // Five cookies sold, two after the buy price was entered. This is the exact
+  // shape that reported 450 profit on 500 of sales.
+  assert.deepEqual(soldCostState({ qty: 5, cost: 50, qty_costed: 2 }),
+    { kind: "partial", qty: 5, costed: 2 });
+});
+
+test("one uncosted unit out of many is still partial", () => {
+  assert.equal(soldCostState({ qty: 11, cost: 500, qty_costed: 10 }).kind, "partial");
+  assert.equal(soldCostState({ qty: 11, cost: 500, qty_costed: 11 }).kind, "full");
+});
+
+test("a database without the migration keeps the old reading", () => {
+  // qty_costed arrives only once the migration is applied. Until then, absent
+  // must not be read as "nothing was costed" — that would call every profit
+  // in the list unknown.
+  assert.deepEqual(soldCostState({ qty: 5, cost: 125 }),
+    { kind: "full", qty: 5, costed: 5 });
+  assert.deepEqual(soldCostState({ qty: 5, cost: 0 }),
+    { kind: "none", qty: 5, costed: 5 });
+  assert.equal(soldCostState({ qty: 5, cost: 125, qty_costed: null }).kind, "full");
+});
+
+test("soldCostState survives a row that is missing or malformed", () => {
+  assert.equal(soldCostState(undefined).kind, "none");
+  assert.equal(soldCostState({}).kind, "none");
+  assert.equal(soldCostState({ qty: "5", cost: "50", qty_costed: "2" }).kind, "partial",
+    "PostgREST sends numerics as strings");
 });
 
 test("since reads as a shift, not a timestamp", () => {

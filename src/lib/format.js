@@ -72,6 +72,31 @@ export function failedValue(item) {
   return null;
 }
 
+/** How much of a product's sales we can actually price.
+
+    articles.cost_price defaults to 0 and cannot be null, so a sale rung up
+    before the buy price was entered recorded a cost of zero — which the report
+    then counts as pure profit. A product can be a mix: some units sold before
+    the price existed, some after. Saying "profit on 2 of 5" is the difference
+    between a figure that is incomplete and one that is wrong.
+
+    A database that has not had the migration applied yet sends no qty_costed.
+    Rather than read that as "none costed" and call every profit unknown, fall
+    back to what the app showed before. */
+export function soldCostState(row) {
+  const qty = Number(row?.qty) || 0;
+  const known = row?.qty_costed;
+
+  if (known === undefined || known === null) {
+    return { kind: (Number(row?.cost) || 0) > 0 ? "full" : "none", qty, costed: qty };
+  }
+
+  const costed = Number(known) || 0;
+  if (costed <= 0) return { kind: "none", qty, costed: 0 };
+  if (costed < qty) return { kind: "partial", qty, costed };
+  return { kind: "full", qty, costed };
+}
+
 export function since(ts, now) {
   const m = Math.max(0, Math.floor((now - ts) / 60000));
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;

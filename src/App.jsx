@@ -22,7 +22,7 @@ import { useBarData } from "./lib/useBarData";
 import { useBackLayer, useExitGuard } from "./lib/useBackButton";
 import { t, setLang, recallLang, LANGUAGES } from "./lib/i18n";
 import {
-  DAY, round2, clamp, CURRENCIES, curOf, amount, money, failedValue, since, shortDate,
+  DAY, round2, clamp, CURRENCIES, curOf, amount, money, failedValue, soldCostState, since, shortDate,
   daysBetween, subState, canOperate, startOfWeek, iso, periodRange, periodLabel,
   stepAnchor,
 } from "./lib/format";
@@ -1963,7 +1963,12 @@ function ProductsSold({ rows, loading, cur }) {
       </div>
 
       <div style={{ maxHeight: 460, overflowY: "auto" }}>
-        {shown.map((r, i) => (
+        {shown.map((r, i) => {
+          /* Some of these units may have been sold before the item had a buy
+             price. Those recorded a cost of zero, so the profit covers only
+             the rest — see soldCostState. */
+          const cs = soldCostState(r);
+          return (
           <div key={i} style={narrow
             ? { padding: "11px 18px", borderBottom: `1px solid ${C.lineFade}` }
             : { display: "grid", gridTemplateColumns: GRID, gap: 14,
@@ -1986,10 +1991,13 @@ function ProductsSold({ rows, loading, cur }) {
                     {" · "}{Number(r.share || 0).toFixed(0)}%
                   </span>
                   <span style={{ fontFamily: SANS, fontSize: 11.5, whiteSpace: "nowrap",
-                    color: Number(r.cost) > 0 ? C.brass : C.sageDim }}>
-                    {Number(r.cost) > 0
-                      ? <>profit <span style={{ fontFamily: MONO, fontSize: 12.5 }}>{money(Number(r.profit) || 0, cur)}</span></>
-                      : "no buy price"}
+                    color: cs.kind === "none" ? C.sageDim
+                      : cs.kind === "partial" ? C.copper : C.brass }}>
+                    {cs.kind === "none"
+                      ? "no buy price"
+                      : <>profit <span style={{ fontFamily: MONO, fontSize: 12.5 }}>{money(Number(r.profit) || 0, cur)}</span>
+                          {cs.kind === "partial" &&
+                            ` · on ${cs.costed} of ${cs.qty}`}</>}
                   </span>
                 </div>
               </>
@@ -2007,17 +2015,25 @@ function ProductsSold({ rows, loading, cur }) {
                   {money(Number(r.gross) || 0, cur)}
                 </span>
                 <span style={{ fontFamily: MONO, fontSize: 13, textAlign: "right",
-                  color: Number(r.cost) > 0 ? C.brass : C.sageDim }}>
-                  {Number(r.cost) > 0 ? money(Number(r.profit) || 0, cur) : "—"}
+                  color: cs.kind === "none" ? C.sageDim
+                    : cs.kind === "partial" ? C.copper : C.brass }}>
+                  {cs.kind === "none" ? "—" : money(Number(r.profit) || 0, cur)}
                 </span>
                 <span style={{ fontFamily: MONO, fontSize: 12, textAlign: "right",
-                  color: Number(r.cost) > 0 ? C.sage : C.sageDim }}>
-                  {Number(r.cost) > 0 ? `${Number(r.margin || 0).toFixed(0)}%` : "—"}
+                  color: cs.kind === "none" ? C.sageDim
+                    : cs.kind === "partial" ? C.copper : C.sage }}>
+                  {/* On a partial product the margin is real but the profit
+                      covers only part of what sold, so say which part. */}
+                  {cs.kind === "none" ? "—"
+                    : cs.kind === "partial"
+                      ? `${cs.costed}/${cs.qty}`
+                      : `${Number(r.margin || 0).toFixed(0)}%`}
                 </span>
               </>
             )}
           </div>
-        ))}
+          );
+        })}
         {!shown.length && !loading && (
           <div style={{ padding: 22, fontFamily: SANS, fontSize: 13, color: C.sageDim }}>
             {q ? "Nothing matches that." : "Nothing sold in this period."}
@@ -3061,6 +3077,46 @@ function FailedWrites({ items, cur, onDismiss, onClose }) {
 
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
         <Btn onClick={onClose}>Close</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+/* --------------------------------------------- a cost that arrived too late
+
+   Sales rung up before an item had a buy price recorded a cost of zero, so
+   they read as pure profit and stay that way — the stamped cost is deliberately
+   never rewritten, because a price change must not restate last month.
+
+   Filling those in is not that, though: there was no figure there to overwrite.
+   Only the sales that recorded nothing are touched, which is why this can be
+   offered safely and why it has to say exactly what it will reach. */
+
+function BackfillCost({ item, cur, onCancel, onConfirm, busy }) {
+  const firstSeen = item.first ? shortDate(new Date(item.first).getTime()) : null;
+  const value = round2(item.cost * Number(item.units || 0));
+  return (
+    <Modal onClose={onCancel} width={420}>
+      <Eyebrow>Earlier sales</Eyebrow>
+      <div style={{ fontSize: 17, fontWeight: 700, color: C.cream, margin: "8px 0 6px" }}>
+        {item.units} {item.name} sold with no buy price
+      </div>
+      <div style={{ fontSize: 12.5, color: C.sage, lineHeight: 1.55 }}>
+        They were rung up{firstSeen ? ` from ${firstSeen}` : ""} before you entered
+        what {item.name} costs you, so each one is counted as pure profit —
+        overstating your takings by {money(value, cur)}.
+        {" "}Record {money(item.cost, cur)} against them?
+      </div>
+      <div style={{ fontSize: 11.5, color: C.sageDim, lineHeight: 1.5, marginTop: 10 }}>
+        Sales that already had a buy price are left exactly as they were, so this
+        can't rewrite a month you priced correctly at the time.
+      </div>
+      <div style={{ display: "flex", gap: 8, marginTop: 18 }}>
+        <Btn variant="ghost" style={{ flex: 1 }} onClick={onCancel}>Leave them</Btn>
+        <Btn variant="solid" icon={busy ? Loader2 : Check} style={{ flex: 1 }}
+          disabled={busy} onClick={onConfirm}>
+          Record {money(item.cost, cur)}
+        </Btn>
       </div>
     </Modal>
   );
@@ -4302,6 +4358,7 @@ export default function App() {
     online, syncing, pendingCount, failed, dismissFailed,
   } = useBarData(session && session.role !== "platform" ? session : null);
   const [showFailed, setShowFailed] = useState(false);
+  const [backfill, setBackfill] = useState(null);   // a cost offered to past sales
   const client = useMemo(() => (session ? clientFor(session) : null), [session]);
 
   const venueRaw = data?.venue || null;
@@ -4751,7 +4808,20 @@ export default function App() {
     deleteTable: (id) => guard((c) => api.deleteTable(c, id)),
     saveZone: (z) => guard((c) => api.upsertZone(c, venue.id, z)),
     deleteZone: (id) => guard((c) => api.deleteZone(c, id)),
-    saveArticle: (a) => guard((c) => api.upsertArticle(c, venue.id, a), "Price list updated"),
+    /* Entering a buy price fixes what this item earns from now on, but not
+       what it already sold for: those sales recorded a cost of zero and read
+       as pure profit for good. If there are any, offer to fill them in. */
+    saveArticle: async (a) => {
+      const saved = await guard((c) => api.upsertArticle(c, venue.id, a), "Price list updated");
+      if (!saved || !a.id || !(a.cost > 0) || !client) return saved;
+      try {
+        const past = await api.uncostedSales(client, venue.id, a.id);
+        if (Number(past?.units) > 0) {
+          setBackfill({ id: a.id, name: a.name, cost: a.cost, ...past });
+        }
+      } catch { /* the offer is a courtesy; never fail the save over it */ }
+      return saved;
+    },
     removeArticle: (id) => guard((c) => api.deleteArticle(c, id), "Article removed"),
     saveStaff: (s2) => guard((c) => api.upsertStaff(c, venue.id, s2), "Team updated"),
     resetStaffPin: (id) => guard((c) => api.resetStaffPin(c, id)),
@@ -5348,6 +5418,20 @@ export default function App() {
       {showFailed && failed.length > 0 && (
         <FailedWrites items={failed} cur={venue?.currency}
           onDismiss={dismissFailed} onClose={() => setShowFailed(false)} />
+      )}
+
+      {backfill && (
+        <BackfillCost item={backfill} cur={venue?.currency} busy={sheetBusy}
+          onCancel={() => setBackfill(null)}
+          onConfirm={async () => {
+            setSheetBusy(true);
+            try {
+              const out = await api.backfillArticleCost(client, venue.id, backfill.id, backfill.cost);
+              flash(`${out.units} earlier ${backfill.name} now counted at ${money(backfill.cost, venue.currency)}`);
+              loadReports();
+            } catch (e) { flash(e.message); }
+            finally { setSheetBusy(false); setBackfill(null); }
+          }} />
       )}
 
       {cashingUp && shift && (
