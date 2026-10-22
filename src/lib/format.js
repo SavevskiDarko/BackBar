@@ -97,6 +97,15 @@ export function soldCostState(row) {
   return { kind: "full", qty, costed };
 }
 
+/** A bill's lines as one readable line: "2 × Espresso · Lemonade".
+    Quantities of one are left bare — "1 × Lemonade" is noise on a receipt. */
+export function billSummary(lines) {
+  return (lines || [])
+    .filter((l) => l && l.name)
+    .map((l) => (Number(l.qty) > 1 ? `${l.qty} × ${l.name}` : l.name))
+    .join(" · ");
+}
+
 export function since(ts, now) {
   const m = Math.max(0, Math.floor((now - ts) / 60000));
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;

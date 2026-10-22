@@ -396,6 +396,14 @@ export async function loadProductsSold(client, barId, from, to) {
   }));
 }
 
+/** Every paid bill in the period, newest first, each carrying its own lines —
+    so an owner can see what a table actually ordered rather than a count. */
+export async function loadBills(client, barId, from, to, limit = 200) {
+  return unwrap(await client.rpc("bar_bills", {
+    p_bar: barId, p_from: from, p_to: to, p_limit: limit,
+  }));
+}
+
 /** How much of one article's history was sold before it had a buy price.
     Those sales recorded a cost of zero, so they report as pure profit. */
 export async function uncostedSales(client, barId, articleId) {

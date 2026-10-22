@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  round2, clamp, curOf, money, linesTotal, failedValue, soldCostState, since, daysBetween,
+  round2, clamp, curOf, money, linesTotal, failedValue, soldCostState, billSummary, since, daysBetween,
   subState, canOperate, startOfWeek, iso, periodRange, stepAnchor,
 } from "../src/lib/format.js";
 
@@ -139,6 +139,33 @@ test("soldCostState survives a row that is missing or malformed", () => {
   assert.equal(soldCostState({}).kind, "none");
   assert.equal(soldCostState({ qty: "5", cost: "50", qty_costed: "2" }).kind, "partial",
     "PostgREST sends numerics as strings");
+});
+
+/* A bill read back as a sentence. This is the whole point of the Bills panel:
+   "12 bills · avg 363" tells an owner nothing about what anyone ordered. */
+
+test("a bill reads as what was ordered", () => {
+  assert.equal(billSummary([
+    { name: "Espresso", qty: 2 },
+    { name: "Lemonade", qty: 1 },
+  ]), "2 × Espresso · Lemonade");
+});
+
+test("a single item needs no quantity in front of it", () => {
+  assert.equal(billSummary([{ name: "Latte", qty: 1 }]), "Latte");
+});
+
+test("billSummary copes with an empty or broken bill", () => {
+  // A bill with no lines is possible — the panel shows its own wording for it.
+  assert.equal(billSummary([]), "");
+  assert.equal(billSummary(null), "");
+  assert.equal(billSummary(undefined), "");
+  assert.equal(billSummary([{ qty: 2 }, { name: "Cookie", qty: 1 }]), "Cookie",
+    "a line with no name is skipped, not rendered as undefined");
+});
+
+test("billSummary takes qty as the string PostgREST sends", () => {
+  assert.equal(billSummary([{ name: "Espresso", qty: "3" }]), "3 × Espresso");
 });
 
 test("since reads as a shift, not a timestamp", () => {

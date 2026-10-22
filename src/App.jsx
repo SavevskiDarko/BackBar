@@ -22,7 +22,7 @@ import { useBarData } from "./lib/useBarData";
 import { useBackLayer, useExitGuard } from "./lib/useBackButton";
 import { t, setLang, recallLang, LANGUAGES } from "./lib/i18n";
 import {
-  DAY, round2, clamp, CURRENCIES, curOf, amount, money, failedValue, soldCostState, since, shortDate,
+  DAY, round2, clamp, CURRENCIES, curOf, amount, money, failedValue, soldCostState, billSummary, since, shortDate,
   daysBetween, subState, canOperate, startOfWeek, iso, periodRange, periodLabel,
   stepAnchor,
 } from "./lib/format";
@@ -1697,7 +1697,7 @@ function SplitList({ rows, cur, nameKey = "name", valueKey = "gross", sub }) {
   );
 }
 
-function Reports({ venue, report, products, productsLoading, loading, mode, setMode, anchor, setAnchor, unpaid, onSettleUnpaid, onExport, exporting, actions, onTestPrinter, onRetryFiscal, onReset, voids,
+function Reports({ venue, report, products, productsLoading, bills, loading, mode, setMode, anchor, setAnchor, unpaid, onSettleUnpaid, onExport, exporting, actions, onTestPrinter, onRetryFiscal, onReset, voids,
   drawer, onCash, onDrawer, onX, onZ }) {
   const cur = venue.currency;
   const t = report?.totals || {};
@@ -1841,6 +1841,8 @@ function Reports({ venue, report, products, productsLoading, loading, mode, setM
 
       <ProductsSold rows={products} loading={productsLoading} cur={cur} />
 
+      <BillsList rows={bills} loading={loading} cur={cur} />
+
       <VoidsCard voids={voids} cur={cur} />
 
       <DrawerCard drawer={report?.drawer} cur={cur} onCash={onCash} />
@@ -1874,6 +1876,125 @@ function Reports({ venue, report, products, productsLoading, loading, mode, setM
 
 /* What sold, how much of it, and what it earned. Sortable because an owner
    asks different questions on different days — what moves, and what pays. */
+/* ------------------------------------------------------------------- bills
+
+   Money could tell you twelve bills averaged 363 but not what any one of them
+   was. This is the answer to "what did table 4 actually have?" — each bill as
+   it was rung up, newest first, with its lines.
+
+   Collapsed it reads as a sentence: 2 × Espresso · Lemonade. Tapping opens the
+   per-line prices, which is what you want when a customer is querying a total
+   while standing at the bar. */
+
+function BillsList({ rows, loading, cur }) {
+  const [open, setOpen] = useState(null);
+  const [q, setQ] = useState("");
+
+  const shown = useMemo(() => {
+    if (!q) return rows;
+    const needle = q.toLowerCase();
+    return rows.filter((b) =>
+      (b.table_label || "").toLowerCase().includes(needle) ||
+      (b.staff || "").toLowerCase().includes(needle) ||
+      billSummary(b.lines).toLowerCase().includes(needle));
+  }, [rows, q]);
+
+  const when = (ts) => new Date(ts).toLocaleTimeString(undefined,
+    { hour: "2-digit", minute: "2-digit" });
+
+  return (
+    <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 14,
+      marginTop: 16, overflow: "hidden" }}>
+      <div style={{ padding: "14px 18px", borderBottom: `1px solid ${C.line}`, display: "flex",
+        alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <Eyebrow>Bills</Eyebrow>
+        {loading && <Loader2 size={13} color={C.sageDim} className="animate-spin" />}
+        <div style={{ position: "relative", marginLeft: "auto", minWidth: 160 }}>
+          <Search size={13} color={C.sageDim} style={{ position: "absolute", left: 10, top: 9 }} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Table, waiter or item"
+            style={{ width: "100%", background: C.ink, border: `1px solid ${C.line}`, borderRadius: 8,
+              padding: "7px 10px 7px 30px", color: C.cream, fontFamily: SANS, fontSize: 12.5, outline: "none" }} />
+        </div>
+      </div>
+
+      <div style={{ maxHeight: 460, overflowY: "auto" }}>
+        {shown.map((b) => {
+          const isOpen = open === b.id;
+          return (
+            <div key={b.id} style={{ borderBottom: `1px solid ${C.lineFade}` }}>
+              <button onClick={() => setOpen(isOpen ? null : b.id)} style={{
+                width: "100%", textAlign: "left", background: "transparent", border: "none",
+                cursor: "pointer", padding: "11px 18px", display: "block",
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "baseline" }}>
+                  <span style={{ fontFamily: SANS, fontSize: 13.5, color: C.cream, fontWeight: 600 }}>
+                    {b.table_label}
+                  </span>
+                  <span style={{ fontFamily: MONO, fontSize: 14, color: C.cream, whiteSpace: "nowrap" }}>
+                    {money(Number(b.total) || 0, cur)}
+                  </span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginTop: 3 }}>
+                  <span style={{ fontFamily: SANS, fontSize: 11.5, color: C.sage, lineHeight: 1.45 }}>
+                    {billSummary(b.lines) || "no items recorded"}
+                  </span>
+                  <span style={{ fontFamily: SANS, fontSize: 11, color: C.sageDim, whiteSpace: "nowrap" }}>
+                    {when(b.settled_at)}
+                    {b.method ? ` · ${b.method === "cash" ? t("Cash") : t("Card")}` : ""}
+                  </span>
+                </div>
+              </button>
+
+              {isOpen && (
+                <div style={{ padding: "0 18px 12px", display: "grid", gap: 4 }}>
+                  {(b.lines || []).map((l, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                      <span style={{ fontFamily: SANS, fontSize: 12, color: C.sage }}>
+                        <span style={{ fontFamily: MONO, color: C.sageDim }}>{l.qty}×</span>{" "}
+                        {l.name}
+                        <span style={{ color: C.sageDim }}> @ {amount(Number(l.unitPrice) || 0, cur)}</span>
+                      </span>
+                      <span style={{ fontFamily: MONO, fontSize: 12, color: C.creamDim, whiteSpace: "nowrap" }}>
+                        {money(Number(l.lineTotal) || 0, cur)}
+                      </span>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12,
+                    marginTop: 4, paddingTop: 6, borderTop: `1px solid ${C.lineFade}` }}>
+                    <span style={{ fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>
+                      {b.staff || "—"}
+                      {Number(b.discount) > 0 ? ` · ${Number(b.discount)}% off` : ""}
+                      {b.receipt_no ? ` · receipt ${b.receipt_no}` : ""}
+                    </span>
+                    <span style={{ fontFamily: MONO, fontSize: 12.5, color: C.brass }}>
+                      {money(Number(b.total) || 0, cur)}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {!shown.length && !loading && (
+          <div style={{ padding: 22, fontFamily: SANS, fontSize: 13, color: C.sageDim }}>
+            {q ? "No bill matches that." : "Nothing paid in this period."}
+          </div>
+        )}
+      </div>
+
+      {/* The query is capped, so say when there is more rather than letting the
+          list quietly end. The CSV export covers the whole period. */}
+      {rows.length >= 200 && !q && (
+        <div style={{ padding: "10px 18px", background: C.raise, borderTop: `1px solid ${C.line}`,
+          fontFamily: SANS, fontSize: 11.5, color: C.sageDim }}>
+          Showing the most recent {rows.length}. Export the period for the rest.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProductsSold({ rows, loading, cur }) {
   const [sort, setSort] = useState("gross");
   const [dir, setDir] = useState(-1);
@@ -4726,6 +4847,7 @@ export default function App() {
   const [unpaid, setUnpaid] = useState([]);
   const [reportLoading, setReportLoading] = useState(false);
   const [products, setProducts] = useState([]);
+  const [bills, setBills] = useState([]);
   const [voids, setVoids] = useState(null);
   const [shift, setShift] = useState(null);
   const [cashingUp, setCashingUp] = useState(false);
@@ -4769,16 +4891,18 @@ export default function App() {
     if (!client || !venue || session?.role !== "owner") return;
     setReportLoading(true); setProductsLoading(true);
     try {
-      const [rep, un, prod, vd] = await Promise.all([
+      const [rep, un, prod, vd, bls] = await Promise.all([
         api.loadReport(client, venue.id, range.from, range.to, mode === "day" ? "hour" : "day"),
         api.loadUnpaidBills(client, venue.id),
         api.loadProductsSold(client, venue.id, range.from, range.to),
         api.loadVoids(client, venue.id, range.from, range.to),
+        api.loadBills(client, venue.id, range.from, range.to),
       ]);
       setReport(rep);
       setUnpaid(un);
       setProducts(prod || []);
       setVoids(vd || null);
+      setBills(bls || []);
     } catch (e) { flash(e.message); }
     finally { setReportLoading(false); setProductsLoading(false); }
   }, [client, venue, session, range.from, range.to, mode, flash]);
@@ -5332,7 +5456,7 @@ export default function App() {
         {isOwner && currentTab === "reports" && (
           <Reports
             venue={venue} report={report} loading={reportLoading}
-            products={products} productsLoading={productsLoading}
+            products={products} productsLoading={productsLoading} bills={bills}
             mode={mode} setMode={setMode} anchor={anchor} setAnchor={setAnchor}
             unpaid={unpaid} onSettleUnpaid={settleUnpaid}
             onExport={exportCsv} exporting={exporting}
